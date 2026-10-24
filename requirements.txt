@@ -1,0 +1,3 @@
+# Runtime dependencies. Keep this minimal while the prototype is taking shape;
+# add real deps here as each module needs them (e.g. an LLM/chat SDK for the
+# conversational check-in, a scheduler lib, etc).
