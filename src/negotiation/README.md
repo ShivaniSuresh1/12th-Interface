@@ -39,14 +39,55 @@ if is_session_boundary(now, student_schedule):
 - **Harshini** (Integration) — this is the component most exercised by
   end-to-end scenario tests.
 
+## For Integration (Harshini)
+
+Beyond the frozen contract, the module also exports helpers the planner
+can use (none of them change the contract):
+
+```python
+from negotiation import (
+    CheckinLog, should_check_in, compose_checkin_message,  # Q6 cadence + batching
+    next_boundary,                                          # when to raise a mid-session disruption
+    training_example,                                       # resolution -> record_choice() input
+)
+
+log = CheckinLog()                                  # one per planner; enforces the daily cap
+window = should_check_in(now, profile.schedule, log)
+if window:
+    proposal = propose_replan(profile, trigger)     # or None if nothing changed
+    send(compose_checkin_message(window, proposal)) # ONE message, not two
+
+resolution = resolve_proposal(proposal, "accept")
+ex = training_example(resolution)
+if ex["chosen_task_type"] and ex["energy_level"] is not None:
+    task_mapping.record_choice(ex["energy_level"], TaskType(ex["chosen_task_type"]))
+```
+
+**Schedule events** are read leniently from `StudentSchedule.events`:
+`{"start", "end"}` (datetime or ISO string) are required; `"kind"`
+(`"study"` default, `"break"`, or anything else like `"class"`),
+`"session_id"`, `"title"` and `"task_type"` are optional. See
+`_schedule.py`. If User Model settles on a different event shape, only
+that file needs to change.
+
+**Triggers** are free-form; `fatigue`, `meeting_ran_late[:<minutes>]`
+and `missed_session` (plus aliases) get specific proposals, anything else
+gets the "tell me what changed" fallback. `proposed_change`'s shape is
+documented at the top of `replanning.py`.
+
 ## TODO
 
-- [ ] Define what counts as a "session boundary" precisely (see `checkin.py`)
-- [ ] Implement the daily check-in cap
-- [ ] Implement replan proposal generation + narration text
-- [ ] Wire `resolve_proposal` outcomes back into `domain_model.StudentTaskMapping`
-- [ ] Implement the "not sure, want to just tell me what changed?" fallback
+- [x] Define what counts as a "session boundary" precisely (see `checkin.py`)
+- [x] Implement the daily check-in cap
+- [x] Implement replan proposal generation + narration text
+- [x] Provide resolution -> labeled example hand-off (`training_example`);
+      the actual `record_choice(...)` call lives in `integration`
+- [x] Implement the "not sure, want to just tell me what changed?" fallback
       (Calendar.help-style graceful fallback when the system isn't confident)
+- [ ] Agree on the schedule event shape with User Model (Shivani)
+- [ ] Make `MAX_CHECKINS_PER_DAY` configurable per student
+- [ ] Parse the free-text answer to the "tell me what changed" fallback
+- [ ] Tune thresholds/durations after the Nov 20 scenario testing
 
 ## Prompt for your AI assistant
 
