@@ -39,10 +39,16 @@ corrected = apply_checkin_correction(baseline, checkin_response="tired")
 
 ## TODO
 
-- [ ] Define `StudentProfile` / `EnergyReport` fields for real (see `models.py` stub)
-- [ ] Implement sleep-based baseline estimate (RISE-style curve)
-- [ ] Implement check-in correction + weighting rule between the two signals
-- [ ] Implement cold-start default rule and the decay as real data accumulates
+- [x] Define `StudentProfile` / `EnergyReport` fields for real (event dict shape
+      documented as `models.Event`; `EnergyReport` validates range/source)
+- [x] Implement sleep-based baseline estimate (two-process curve: sleep pressure +
+      circadian, with a per-time-of-day learned blend from past check-ins)
+- [x] Implement check-in correction + weighting rule (`CHECKIN_WEIGHT = 0.6`)
+- [x] Cold-start flag: `StudentProfile.record_energy()` clears it after
+      `COLD_START_MIN_CHECKINS` check-ins
+- [ ] Onboarding survey (Q2) — agree with Vyshnavi which answers live here vs.
+      in `StudentTaskMapping`
+- [ ] Tune constants against real study-scenario data (Nov 20 milestone)
 - [ ] Persist energy history per student (storage TBD — SQLite suggested, not finalized)
 
 ## Prompt for your AI assistant
