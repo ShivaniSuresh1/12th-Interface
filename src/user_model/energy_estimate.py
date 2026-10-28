@@ -29,11 +29,17 @@ DEFAULT_WAKE_TIME = time(7, 30)  # used when no "sleep" event is logged
 
 # Homeostatic process: pressure on waking, and its rise time constant (h).
 WAKE_PRESSURE_RESTED = 0.15
-WAKE_PRESSURE_PER_DEBT_HOUR = 0.08
-WAKE_PRESSURE_MAX = 0.75
+WAKE_PRESSURE_PER_DEBT_HOUR = 0.15
+WAKE_PRESSURE_MAX = 0.9
 PRESSURE_RISE_TAU_HOURS = 18.2
 
 HOMEOSTATIC_WEIGHT = 0.6  # circadian gets the remaining 0.4
+
+# The raw two-process mix only spans roughly 0.1-0.8; stretch that onto the
+# full 0-1 scale so domain_model's 0.33 / 0.66 buckets are all reachable
+# (rested peak hours ~0.8 = "high", ~4h of sleep ~0.35-0.45 by day).
+RAW_FLOOR = 0.1
+RAW_CEILING = 0.8
 
 # Personal learning: time-of-day bins of past check-ins.
 BIN_HOURS = 3
@@ -100,7 +106,8 @@ def generic_energy(hours_awake: float, sleep_debt_hours: float, hour_of_day: flo
         + 0.35 * math.cos(2 * math.pi * (hour_of_day - 16) / 24)  # trough ~4am, high ~4pm
         - 0.15 * math.cos(2 * math.pi * (hour_of_day - 14) / 12)  # post-lunch dip ~2pm
     )
-    return _clamp(HOMEOSTATIC_WEIGHT * homeostatic + (1 - HOMEOSTATIC_WEIGHT) * _clamp(circadian))
+    raw = HOMEOSTATIC_WEIGHT * homeostatic + (1 - HOMEOSTATIC_WEIGHT) * _clamp(circadian)
+    return _clamp((raw - RAW_FLOOR) / (RAW_CEILING - RAW_FLOOR))
 
 
 def apply_checkin_correction(baseline: EnergyReport, checkin_response: str) -> EnergyReport:

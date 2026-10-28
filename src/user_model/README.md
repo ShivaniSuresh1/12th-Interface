@@ -46,8 +46,10 @@ corrected = apply_checkin_correction(baseline, checkin_response="tired")
 - [x] Implement check-in correction + weighting rule (`CHECKIN_WEIGHT = 0.6`)
 - [x] Cold-start flag: `StudentProfile.record_energy()` clears it after
       `COLD_START_MIN_CHECKINS` check-ins
-- [ ] Onboarding survey (Q2) — agree with Vyshnavi which answers live here vs.
-      in `StudentTaskMapping`
+- [x] Onboarding survey (Q2), User Model half: `apply_sleep_survey()` (sleep
+      and wake time); task preferences go to `StudentTaskMapping.from_survey()`
+- [x] Calibrate the curve onto the full 0-1 scale so domain_model's
+      0.33 / 0.66 buckets are all reachable
 - [ ] Tune constants against real study-scenario data (Nov 20 milestone)
 - [ ] Persist energy history per student (storage TBD — SQLite suggested, not finalized)
 
