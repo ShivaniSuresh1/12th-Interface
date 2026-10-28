@@ -80,3 +80,17 @@ def test_rejected_replan_does_not_update_mapping():
         planner.handle_resolution(proposal, student_response="no")
 
     record.assert_not_called()
+
+
+def test_enough_checkins_turn_off_cold_start():
+    from user_model.models import COLD_START_MIN_CHECKINS
+
+    planner = StudySessionPlanner(student_id="s1")
+    assert planner.profile.cold_start is True
+
+    for _ in range(COLD_START_MIN_CHECKINS - 1):
+        planner.handle_checkin(response="tired")
+        assert planner.profile.cold_start is True
+
+    planner.handle_checkin(response="tired")
+    assert planner.profile.cold_start is False
