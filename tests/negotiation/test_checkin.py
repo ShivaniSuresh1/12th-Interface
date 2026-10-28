@@ -49,20 +49,42 @@ def test_non_study_events_are_not_boundaries(schedule):
 def test_accepts_list_dict_and_iso_strings(events):
     assert is_session_boundary(at(14), events)
     assert is_session_boundary(at(14), {"events": events})
-    iso = [{"start": at(14).isoformat(), "end": at(15).isoformat()}]  # no kind -> study
+    iso = [{"start": at(14).isoformat(), "end": at(15).isoformat(), "kind": "study"}]
     assert is_session_boundary(at(14), iso)
+
+
+def test_events_without_kind_are_skipped():
+    untagged = [{"start": at(14), "end": at(15)}, {"start": at(16), "end": at(17), "kind": ""}]
+    assert not is_session_boundary(at(14), untagged)
+    assert not is_session_boundary(at(16), untagged)
+
+
+def test_mixed_timezones_keep_every_boundary():
+    naive_local = at(14)
+    aware = (at(16)).astimezone(UTC)  # 16:00 local, expressed in UTC
+    events = [
+        {"start": naive_local, "end": naive_local + timedelta(hours=1), "kind": "study"},
+        {"start": aware, "end": aware + timedelta(hours=1), "kind": "study"},
+    ]
+    assert is_session_boundary(at(14), events)
+    assert is_session_boundary(at(16), events)
+    assert is_session_boundary(at(16).astimezone(UTC), events)
 
 
 def test_unreadable_schedules_are_never_boundaries():
     assert not is_session_boundary(at(14), None)
     assert not is_session_boundary(at(14), object())
-    assert not is_session_boundary(at(14), [{"start": "not a date"}, "junk", {"end": at(15)}])
+    assert not is_session_boundary(
+        at(14), [{"start": "x", "kind": "study"}, "junk", {"end": at(15), "kind": "study"}]
+    )
     # end before start is skipped
-    assert not is_session_boundary(at(14), [{"start": at(15), "end": at(14)}])
+    assert not is_session_boundary(at(14), [{"start": at(15), "end": at(14), "kind": "study"}])
 
 
 def test_timezone_aware_schedule():
-    events = [{"start": at(14).replace(tzinfo=UTC), "end": at(15).replace(tzinfo=UTC)}]
+    events = [
+        {"start": at(14).replace(tzinfo=UTC), "end": at(15).replace(tzinfo=UTC), "kind": "study"}
+    ]
     now_elsewhere = at(9).replace(tzinfo=timezone(timedelta(hours=-5)))  # == 14:00 UTC
     assert is_session_boundary(now_elsewhere, events)
 

@@ -46,16 +46,18 @@ can use (none of them change the contract):
 
 ```python
 from negotiation import (
-    CheckinLog, should_check_in, compose_checkin_message,  # Q6 cadence + batching
-    next_boundary,                                          # when to raise a mid-session disruption
-    training_example,                                       # resolution -> record_choice() input
+    CheckinLog,
+    should_check_in,
+    compose_checkin_message,  # Q6 cadence + batching
+    next_boundary,  # when to raise a mid-session disruption
+    training_example,  # resolution -> record_choice() input
 )
 
-log = CheckinLog()                                  # one per planner; enforces the daily cap
+log = CheckinLog()  # one per planner; enforces the daily cap
 window = should_check_in(now, profile.schedule, log)
 if window:
-    proposal = propose_replan(profile, trigger)     # or None if nothing changed
-    send(compose_checkin_message(window, proposal)) # ONE message, not two
+    proposal = propose_replan(profile, trigger)  # or None if nothing changed
+    send(compose_checkin_message(window, proposal))  # ONE message, not two
 
 resolution = resolve_proposal(proposal, "accept")
 ex = training_example(resolution)
@@ -64,11 +66,11 @@ if ex["chosen_task_type"] and ex["energy_level"] is not None:
 ```
 
 **Schedule events** are read leniently from `StudentSchedule.events`:
-`{"start", "end"}` (datetime or ISO string) are required; `"kind"`
-(`"study"` default, `"break"`, or anything else like `"class"`),
-`"session_id"`, `"title"` and `"task_type"` are optional. See
-`_schedule.py`. If User Model settles on a different event shape, only
-that file needs to change.
+`"kind"` (`"study"`, `"break"`, or anything else like `"class"`) and
+`"start"`/`"end"` (datetime or ISO string) are required -- events without
+a kind are skipped, never guessed to be study. `"session_id"`, `"title"`
+and `"task_type"` are optional. Naive times are read as the student's
+local time. This matches `user_model.models.Event`; see `_schedule.py`.
 
 **Triggers** are free-form; `fatigue`, `meeting_ran_late[:<minutes>]`
 and `missed_session` (plus aliases) get specific proposals, anything else
@@ -84,7 +86,7 @@ documented at the top of `replanning.py`.
       the actual `record_choice(...)` call lives in `integration`
 - [x] Implement the "not sure, want to just tell me what changed?" fallback
       (Calendar.help-style graceful fallback when the system isn't confident)
-- [ ] Agree on the schedule event shape with User Model (Shivani)
+- [x] Agree on the schedule event shape with User Model (Shivani)
 - [ ] Make `MAX_CHECKINS_PER_DAY` configurable per student
 - [ ] Parse the free-text answer to the "tell me what changed" fallback
 - [ ] Tune thresholds/durations after the Nov 20 scenario testing

@@ -1,19 +1,20 @@
 """Lenient reader for schedule events. Internal to negotiation.
 
-`user_model.StudentSchedule.events` is still `list[dict]` with no agreed
-shape, so this accepts what's most likely and skips anything it can't read
-instead of crashing. Recognized event keys:
+Reads `user_model.StudentSchedule.events`, whose shape is agreed with User
+Model (`user_model.models.Event`). Anything unreadable is skipped instead of
+crashing. The keys negotiation uses:
 
     {
         "start": datetime | ISO-8601 str,   # required
         "end": datetime | ISO-8601 str,     # required, after start
-        "kind": "study" | "break" | <anything else, e.g. "class", "meeting">,
+        "kind": "study" | "break" | <anything else, e.g. "class", "meeting">,  # required
         "session_id": str,                  # optional
         "title": str,                       # optional, used in narration
         "task_type": str,                   # optional, a domain_model TaskType value
     }
 
-An event with no "kind" is treated as a study session.
+Events with no "kind" are skipped. Mixed naive/aware times are fine: naive
+ones are read as the student's local time, matching user_model.
 """
 
 from __future__ import annotations
@@ -69,33 +70,45 @@ def raw_events(schedule: object) -> list:
     return getattr(schedule, "events", None) or []
 
 
+def _local(dt: datetime) -> datetime:
+    """Naive times are the student's local time (same rule as user_model)."""
+    return dt.astimezone() if dt.tzinfo is None else dt
+
+
 def parse_events(schedule: object) -> list[Event]:
-    """Return the readable events in `schedule`, sorted by start time."""
-    events = []
+    """Return the readable events in `schedule`, sorted by start time.
+
+    Events with no "kind" are skipped rather than guessed at, so an untagged
+    class or meeting never becomes a check-in point. If any event carries a
+    timezone, naive times are read as the student's local time so the whole
+    schedule compares consistently.
+    """
+    readable = []
     for raw in raw_events(schedule):
-        if not isinstance(raw, dict):
+        if not isinstance(raw, dict) or not raw.get("kind"):
             continue
         start = _to_datetime(raw.get("start"))
         end = _to_datetime(raw.get("end"))
-        if start is None or end is None or end <= start:
+        if start is None or end is None:
             continue
-        if (start.tzinfo is None) != (end.tzinfo is None):
-            continue
-        events.append(
-            Event(
-                start=start,
-                end=end,
-                kind=str(raw.get("kind") or "study").lower(),
-                session_id=raw.get("session_id"),
-                title=raw.get("title"),
-                task_type=raw.get("task_type"),
-            )
+        readable.append((raw, start, end))
+
+    if any(dt.tzinfo is not None for _, start, end in readable for dt in (start, end)):
+        readable = [(raw, _local(start), _local(end)) for raw, start, end in readable]
+
+    events = [
+        Event(
+            start=start,
+            end=end,
+            kind=str(raw["kind"]).lower(),
+            session_id=raw.get("session_id"),
+            title=raw.get("title"),
+            task_type=raw.get("task_type"),
         )
-    try:
-        events.sort(key=lambda e: e.start)
-    except TypeError:
-        # Mix of naive and aware events -- can't order them reliably.
-        return []
+        for raw, start, end in readable
+        if end > start
+    ]
+    events.sort(key=lambda e: e.start)
     return events
 
 
