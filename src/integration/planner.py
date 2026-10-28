@@ -42,7 +42,7 @@ class StudySessionPlanner:
         """Apply a conversational check-in correction (Q1, at a session boundary)."""
         baseline = estimate_baseline_energy(self.profile)
         corrected = apply_checkin_correction(baseline, response)
-        self.profile.energy_history.append(corrected)
+        self.profile.record_energy(corrected)
         return corrected
 
     def handle_disruption(self, trigger: str) -> ReplanProposal:
