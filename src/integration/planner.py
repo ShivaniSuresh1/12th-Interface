@@ -9,18 +9,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from domain_model import StudentTaskMapping, recommend_task_type
+from domain_model.taxonomy import TaskType
 from negotiation import ReplanProposal, propose_replan, resolve_proposal
-from user_model import StudentProfile, apply_checkin_correction, estimate_baseline_energy
+from negotiation.replanning import ReplanResolution
+from user_model import (
+    EnergyReport,
+    StudentProfile,
+    apply_checkin_correction,
+    estimate_baseline_energy,
+)
 
 
 @dataclass
 class StudySessionPlanner:
-    """Thin orchestrator tying the three owned components together.
-
-    TODO (Harshini): flesh this out as the other modules' real
-    implementations land. This stub exists mainly so an end-to-end
-    "smoke test" scenario can be written against *something* from day one.
-    """
+    """Thin orchestrator tying the three owned components together."""
 
     student_id: str
     profile: StudentProfile = field(init=False)
@@ -30,13 +32,13 @@ class StudySessionPlanner:
         self.profile = StudentProfile(student_id=self.student_id)
         self.task_mapping = StudentTaskMapping(student_id=self.student_id)
 
-    def plan_day(self):
-        """Produce today's plan: baseline energy -> recommended task type."""
-        baseline = estimate_baseline_energy(self.profile)
-        task_type, why = recommend_task_type(self.task_mapping, baseline.energy_level)
-        return {"energy": baseline, "recommended_task_type": task_type, "why": why}
+    def plan_day(self) -> dict:
+        """Produce today's plan: current energy -> recommended task type."""
+        energy = self._current_energy()
+        task_type, why = recommend_task_type(self.task_mapping, energy.energy_level)
+        return {"energy": energy, "recommended_task_type": task_type, "why": why}
 
-    def handle_checkin(self, response: str):
+    def handle_checkin(self, response: str) -> EnergyReport:
         """Apply a conversational check-in correction (Q1, at a session boundary)."""
         baseline = estimate_baseline_energy(self.profile)
         corrected = apply_checkin_correction(baseline, response)
@@ -47,9 +49,38 @@ class StudySessionPlanner:
         """Something changed -- propose (never silently apply) a replan."""
         return propose_replan(self.profile, trigger=trigger)
 
-    def handle_resolution(self, proposal: ReplanProposal, student_response: str):
+    def handle_resolution(
+        self, proposal: ReplanProposal, student_response: str
+    ) -> ReplanResolution:
         """Resolve a replan proposal and feed the outcome back into learning."""
         resolution = resolve_proposal(proposal, student_response)
-        # TODO: translate resolution.outcome into a
-        # self.task_mapping.record_choice(...) call once the shapes line up.
+        chosen = self._chosen_task_type(resolution)
+        if chosen is not None:
+            level = self._current_energy().energy_level
+            self.task_mapping.record_choice(level, chosen)
         return resolution
+
+    # -- small private helpers (no domain logic, just plumbing) --
+
+    def _current_energy(self) -> EnergyReport:
+        """Latest check-in-corrected energy if we have one, else the baseline."""
+        if self.profile.energy_history:
+            return self.profile.energy_history[-1]
+        return estimate_baseline_energy(self.profile)
+
+    @staticmethod
+    def _chosen_task_type(resolution: ReplanResolution) -> TaskType | None:
+        """Pull the student's chosen TaskType out of a resolution, if any."""
+        if resolution.outcome == "rejected":
+            return None
+        if resolution.outcome == "edited" and resolution.edited_change:
+            change = resolution.edited_change
+        else:
+            change = resolution.proposal.proposed_change
+        raw = change.get("task_type") if isinstance(change, dict) else None
+        if raw is None:
+            return None
+        try:
+            return TaskType(raw)
+        except ValueError:
+            return None
