@@ -144,6 +144,41 @@ def test_energy_report_rejects_invalid_values(lvl, src):
         EnergyReport("s1", at(0), lvl, src)
 
 
+def test_iso_string_times_are_accepted():
+    as_str = StudentProfile(
+        student_id="s1",
+        schedule=StudentSchedule(
+            student_id="s1",
+            events=[{"kind": "sleep", "start": at(3).isoformat(), "end": at(11).isoformat()}],
+        ),
+    )
+    as_dt = StudentProfile(
+        student_id="s1",
+        schedule=StudentSchedule(
+            student_id="s1", events=[{"kind": "sleep", "start": at(3), "end": at(11)}]
+        ),
+    )
+    assert level(as_str, 22) == pytest.approx(level(as_dt, 22))
+
+
+def test_unreadable_or_foreign_events_are_skipped_not_crashed_on():
+    sched = StudentSchedule(
+        student_id="s1",
+        events=[
+            {"kind": "sleep", "start": "last night", "end": "this morning"},
+            {"kind": "sleep", "end": at(9)},  # no start: wake time only
+            {"kind": "study", "start": at(10), "end": at(11), "session_id": "a", "task_type": "reading"},
+            {"kind": "deadline", "start": "2026-10-29T23:59"},
+            {"start": at(12), "end": at(13)},  # no kind
+            "not an event",
+        ],
+    )
+    p = StudentProfile(student_id="s1", schedule=sched)
+    assert sched.last_sleep_before(at(20))["end"] == at(9)
+    assert 0.0 <= level(p, 20) <= 1.0
+    assert len(sched.upcoming_deadlines(at(0))) == 1
+
+
 def test_upcoming_deadlines_sorted_and_filtered():
     sched = StudentSchedule(
         student_id="s1",

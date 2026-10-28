@@ -152,7 +152,7 @@ def parse_checkin_response(response: str) -> float | None:
 def _hours_awake(profile: StudentProfile, at: datetime) -> float:
     sleep = profile.schedule.last_sleep_before(at) if profile.schedule else None
     if sleep is not None:
-        wake = as_aware(sleep["end"])
+        wake = sleep["end"]
     else:
         wake = datetime.combine(at.date(), DEFAULT_WAKE_TIME, tzinfo=at.tzinfo)
         if wake > at:  # still up from yesterday (e.g. 1am)
@@ -164,8 +164,8 @@ def _sleep_debt(profile: StudentProfile, at: datetime) -> float:
     sleep_hours = profile.sleep_hours
     if sleep_hours is None and profile.schedule:
         sleep = profile.schedule.last_sleep_before(at)
-        if sleep is not None:
-            sleep_hours = (as_aware(sleep["end"]) - as_aware(sleep["start"])).total_seconds() / 3600
+        if sleep is not None and "start" in sleep:
+            sleep_hours = (sleep["end"] - sleep["start"]).total_seconds() / 3600
     if sleep_hours is None:
         return 0.0  # unknown -> assume rested rather than invent a penalty
     return max(0.0, SLEEP_NEED_HOURS - sleep_hours)

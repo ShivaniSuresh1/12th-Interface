@@ -18,18 +18,26 @@ COLD_START_MIN_CHECKINS = 5
 
 
 class Event(TypedDict):
-    """Shape of one entry in `StudentSchedule.events`.
+    """Shape of one entry in `StudentSchedule.events` (shared with negotiation).
 
-    `kind` is one of "class", "meeting", "deadline", "sleep", "other".
-    A "deadline" uses `start` as the due time; `end` may be omitted.
-    A "sleep" event is how a student logs last night's sleep -- the User
-    Model uses its `end` as the wake time and its length as sleep_hours.
+    `kind` is required, one of:
+      "study"    -- a planned study session (negotiation checks in at its edges)
+      "break"    -- a break between study sessions
+      "class", "meeting", "other" -- fixed commitments, not check-in points
+      "deadline" -- uses `start` as the due time; `end` may be omitted
+      "sleep"    -- last night's sleep; the User Model uses its `end` as the
+                    wake time and its length as sleep_hours
+
+    `start`/`end` are datetimes or ISO-8601 strings. Naive times mean the
+    student's local time. Events whose times can't be read are skipped.
     """
 
     kind: str
-    start: datetime
-    end: NotRequired[datetime]
+    start: datetime | str
+    end: NotRequired[datetime | str]
     title: NotRequired[str]
+    session_id: NotRequired[str]
+    task_type: NotRequired[str]  # a domain_model TaskType value, for "study"
 
 
 @dataclass
@@ -40,22 +48,31 @@ class StudentSchedule:
     events: list[dict] = field(default_factory=list)  # each is an `Event`
 
     def last_sleep_before(self, at: datetime) -> dict | None:
-        """Most recent "sleep" event that ended at or before `at`."""
-        sleeps = [
-            e
-            for e in self.events
-            if e.get("kind") == "sleep" and "end" in e and as_aware(e["end"]) <= as_aware(at)
-        ]
-        return max(sleeps, key=lambda e: as_aware(e["end"]), default=None)
+        """Most recent "sleep" event that ended at or before `at`.
+
+        The returned event's `start`/`end` are normalized to aware datetimes.
+        """
+        at = as_aware(at)
+        sleeps = [e for e in self._readable("sleep", "end") if e["end"] <= at]
+        return max(sleeps, key=lambda e: e["end"], default=None)
 
     def upcoming_deadlines(self, after: datetime) -> list[dict]:
-        """Deadlines due after `after`, soonest first."""
-        due = [
-            e
-            for e in self.events
-            if e.get("kind") == "deadline" and as_aware(e["start"]) > as_aware(after)
-        ]
-        return sorted(due, key=lambda e: as_aware(e["start"]))
+        """Deadlines due after `after`, soonest first (times normalized)."""
+        after = as_aware(after)
+        due = [e for e in self._readable("deadline", "start") if e["start"] > after]
+        return sorted(due, key=lambda e: e["start"])
+
+    def _readable(self, kind: str, required: str) -> list[dict]:
+        """Copies of `kind` events with their times parsed; unreadable ones dropped."""
+        out = []
+        for e in self.events:
+            if not isinstance(e, dict) or e.get("kind") != kind:
+                continue
+            times = {k: parse_time(e[k]) for k in ("start", "end") if k in e}
+            if times.get(required) is None or None in times.values():
+                continue
+            out.append({**e, **times})
+        return out
 
 
 @dataclass
@@ -102,3 +119,13 @@ class StudentProfile:
 def as_aware(dt: datetime) -> datetime:
     """Treat naive datetimes as local time so all comparisons are tz-aware."""
     return dt if dt.tzinfo is not None else dt.astimezone()
+
+
+def parse_time(value: object) -> datetime | None:
+    """A datetime or ISO-8601 string as an aware datetime, or None if unreadable."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return as_aware(value) if isinstance(value, datetime) else None
