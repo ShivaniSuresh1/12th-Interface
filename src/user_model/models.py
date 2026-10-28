@@ -1,38 +1,82 @@
-"""Data model stubs for the User Model component (owner: Shivani).
+"""Data model for the User Model component (owner: Shivani).
 
-These are intentionally minimal placeholders so other modules can import
-and type against something stable while the real fields get fleshed out.
-Replace freely -- just try to keep the public names (StudentProfile,
-EnergyReport, StudentSchedule) stable so Domain Model / Negotiation don't
-all need to change in lockstep.
+Field names here are frozen by docs/CONTRACTS.md -- add methods freely,
+but don't add/rename/reorder dataclass fields without a team conversation.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import NotRequired, TypedDict
+
+ENERGY_SOURCES = ("baseline", "checkin_corrected")
+
+# Number of check-in-corrected reports before a student leaves cold start
+# (Q2). Until then, other modules should lean on default rules.
+COLD_START_MIN_CHECKINS = 5
+
+
+class Event(TypedDict):
+    """Shape of one entry in `StudentSchedule.events`.
+
+    `kind` is one of "class", "meeting", "deadline", "sleep", "other".
+    A "deadline" uses `start` as the due time; `end` may be omitted.
+    A "sleep" event is how a student logs last night's sleep -- the User
+    Model uses its `end` as the wake time and its length as sleep_hours.
+    """
+
+    kind: str
+    start: datetime
+    end: NotRequired[datetime]
+    title: NotRequired[str]
 
 
 @dataclass
 class StudentSchedule:
-    """A student's known commitments. Placeholder shape."""
+    """A student's known commitments (classes, meetings, deadlines, sleep)."""
 
     student_id: str
-    events: list[dict] = field(default_factory=list)  # TODO: real Event type
+    events: list[dict] = field(default_factory=list)  # each is an `Event`
+
+    def last_sleep_before(self, at: datetime) -> dict | None:
+        """Most recent "sleep" event that ended at or before `at`."""
+        sleeps = [
+            e
+            for e in self.events
+            if e.get("kind") == "sleep" and "end" in e and as_aware(e["end"]) <= as_aware(at)
+        ]
+        return max(sleeps, key=lambda e: as_aware(e["end"]), default=None)
+
+    def upcoming_deadlines(self, after: datetime) -> list[dict]:
+        """Deadlines due after `after`, soonest first."""
+        due = [
+            e
+            for e in self.events
+            if e.get("kind") == "deadline" and as_aware(e["start"]) > as_aware(after)
+        ]
+        return sorted(due, key=lambda e: as_aware(e["start"]))
 
 
 @dataclass
 class EnergyReport:
     """A point-in-time energy estimate for a student.
 
-    `source` distinguishes a sleep-based baseline from a check-in-corrected
-    value, per the Q1 hybrid design.
+    `energy_level` is 0.0 (exhausted) .. 1.0 (fully energized). `source`
+    distinguishes a sleep-based baseline from a check-in-corrected value,
+    per the Q1 hybrid design.
     """
 
     student_id: str
     timestamp: datetime
-    energy_level: float  # TODO: agree on scale, e.g. 0.0-1.0 or 1-5
+    energy_level: float
     source: str  # "baseline" | "checkin_corrected"
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.energy_level <= 1.0:
+            raise ValueError(f"energy_level must be in [0.0, 1.0], got {self.energy_level}")
+        if self.source not in ENERGY_SOURCES:
+            raise ValueError(f"source must be one of {ENERGY_SOURCES}, got {self.source!r}")
 
 
 @dataclass
@@ -42,5 +86,19 @@ class StudentProfile:
     student_id: str
     sleep_hours: float | None = None
     schedule: StudentSchedule | None = None
-    cold_start: bool = True  # True until enough real sessions exist (Q2)
+    cold_start: bool = True  # True until enough real check-ins exist (Q2)
     energy_history: list[EnergyReport] = field(default_factory=list)
+
+    def checkin_reports(self) -> list[EnergyReport]:
+        """History entries that carry a real self-report signal."""
+        return [r for r in self.energy_history if r.source == "checkin_corrected"]
+
+    def record_energy(self, report: EnergyReport) -> None:
+        """Append a report to history and update the cold-start flag (Q2)."""
+        self.energy_history.append(report)
+        self.cold_start = len(self.checkin_reports()) < COLD_START_MIN_CHECKINS
+
+
+def as_aware(dt: datetime) -> datetime:
+    """Treat naive datetimes as local time so all comparisons are tz-aware."""
+    return dt if dt.tzinfo is not None else dt.astimezone()
