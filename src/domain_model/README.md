@@ -30,6 +30,40 @@ task_type, why = recommend_task_type(mapping, energy_level=0.3)
 # task_type -> TaskType.READING, why -> "because you usually prefer reading when tired"
 ```
 
+## How it works
+
+- **Taxonomy (Q3, `taxonomy.py`):** four fixed `TaskType`s, each with a
+  default difficulty on a 1–5 scale (`DEFAULT_DIFFICULTY`). A student can
+  override a task's difficulty with `task.set_difficulty(n)` (or `None` to
+  reset); `task.effective_difficulty()` returns the override or the default.
+- **Energy buckets:** `low` < 0.33 ≤ `medium` < 0.66 ≤ `high`
+  (`LOW_ENERGY` / `HIGH_ENERGY` in `mapping.py`; `negotiation` mirrors these).
+- **Prior (Q2):** the student's onboarding-survey answer for that bucket, or
+  the default rule (high → problem sets, medium → review, low → reading).
+- **Learning (Q4/Q5):** `record_choice(energy_level, chosen_type)` counts
+  each accepted/edited choice per bucket. `preferences[bucket]` is the type
+  the student has picked most often there.
+- **Decaying blend (Q4, PTIME-style):** `learned_weight = n / (n + 5)` after
+  `n` recorded choices, so the survey/default fades out — after 5 choices
+  (= user_model's `COLD_START_MIN_CHECKINS`) learned data counts as much as
+  the prior. Per bucket, each type scores
+  `(1 - learned_weight) * [is the prior] + learned_weight * (its share of choices)`.
+- **Explanations:** `recommend_task_type` always returns one "because …"
+  sentence saying whether the pick comes from the default, the survey, or the
+  student's own choices. `mapping.blend_summary()` makes the survey → learned
+  shift visible ("now 50% based on your own choices …").
+
+Additive helpers (no contract change):
+
+```python
+from domain_model import StudentTaskMapping, recommend_task
+
+mapping = StudentTaskMapping.from_survey("s1", {"low": "problem_set"})  # Q2 survey answers
+mapping.blend_summary()        # one sentence showing the survey -> learned shift
+task, why = recommend_task(mapping, energy_level=0.3, tasks=todays_tasks)
+# picks a concrete Task: recommended type first, then difficulty closest to the energy
+```
+
 ## Works closely with
 
 - **User Model** (Shivani) — consumes `EnergyReport.energy_level` to
@@ -39,12 +73,21 @@ task_type, why = recommend_task_type(mapping, energy_level=0.3)
 
 ## TODO
 
-- [ ] Finalize the fixed taxonomy (`TaskType` enum) — problem sets, reading,
-      review, memorization is the starting proposal
-- [ ] Implement default difficulty per type + student override
-- [ ] Implement the per-student weighted lookup / decaying blend (Q4)
-- [ ] Implement the default energy→task rule used during cold start (Q2)
-- [ ] Implement the one-sentence explanation generator
+- [x] Finalize the fixed taxonomy (`TaskType` enum) — problem sets, reading,
+      review, memorization (unchanged from the proposal)
+- [x] Implement default difficulty per type + student override
+      (`DEFAULT_DIFFICULTY`, `Task.set_difficulty`, validated 1–5)
+- [x] Implement the per-student weighted lookup / decaying blend (Q4)
+- [x] Implement the default energy→task rule used during cold start (Q2)
+- [x] Implement the one-sentence explanation generator
+- [ ] Agree with Shivani on the bucket cut points (a well-rested student sits
+      around 0.62–0.69, so "high" mostly fires in the morning) — any change
+      must also update `negotiation.replanning.LOW_ENERGY` / `HIGH_ENERGY`
+- [ ] Agree with Shivani where the onboarding survey runs; task-preference
+      answers plug in here via `StudentTaskMapping.from_survey(...)`
+- [ ] Persist survey answers and choice counts (they are plain attributes, not
+      contract fields, so they aren't saved with the dataclass yet)
+- [ ] Tune `PRIOR_STRENGTH` against real study-scenario data (Nov 20 milestone)
 
 ## Prompt for your AI assistant
 
