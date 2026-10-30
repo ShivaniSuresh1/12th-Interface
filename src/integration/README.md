@@ -77,7 +77,7 @@ Rules you must follow:
 2. Keep StudySessionPlanner's public methods exactly as specified:
    plan_day(self), handle_checkin(self, response),
    handle_disruption(self, trigger), handle_resolution(self, proposal,
-   student_response). Rewrite bodies freely.
+   student_response, edited_change=None). Rewrite bodies freely.
 3. Treat the other three modules as the ground truth for their own types
    (EnergyReport, TaskType, StudentTaskMapping, ReplanProposal, etc.) —
    don't redefine or duplicate them here, import them.

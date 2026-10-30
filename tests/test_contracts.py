@@ -131,4 +131,5 @@ def test_integration_contract():
         "self",
         "proposal",
         "student_response",
+        "edited_change",
     ]
