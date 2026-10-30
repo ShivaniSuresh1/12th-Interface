@@ -7,6 +7,7 @@ real logic belongs in the owning module, not here.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from domain_model import StudentTaskMapping, recommend_task_type
 from domain_model.taxonomy import TaskType
@@ -18,6 +19,10 @@ from user_model import (
     apply_checkin_correction,
     estimate_baseline_energy,
 )
+from user_model.models import as_aware
+
+# A check-in older than this no longer reflects how the student feels now.
+RECENT_CHECKIN_WINDOW = timedelta(hours=2)
 
 
 @dataclass
@@ -50,10 +55,15 @@ class StudySessionPlanner:
         return propose_replan(self.profile, trigger=trigger)
 
     def handle_resolution(
-        self, proposal: ReplanProposal, student_response: str
+        self,
+        proposal: ReplanProposal,
+        student_response: str,
+        edited_change: dict | None = None,
     ) -> ReplanResolution:
         """Resolve a replan proposal and feed the outcome back into learning."""
-        resolution = resolve_proposal(proposal, student_response)
+        resolution = resolve_proposal(
+            proposal, student_response, edited_change=edited_change
+        )
         chosen = self._chosen_task_type(resolution)
         if chosen is not None:
             level = self._current_energy().energy_level
@@ -63,9 +73,12 @@ class StudySessionPlanner:
     # -- small private helpers (no domain logic, just plumbing) --
 
     def _current_energy(self) -> EnergyReport:
-        """Latest check-in-corrected energy if we have one, else the baseline."""
+        """Latest check-in if it is recent, else the baseline estimate."""
         if self.profile.energy_history:
-            return self.profile.energy_history[-1]
+            latest = self.profile.energy_history[-1]
+            age = datetime.now().astimezone() - as_aware(latest.timestamp)
+            if age <= RECENT_CHECKIN_WINDOW:
+                return latest
         return estimate_baseline_energy(self.profile)
 
     @staticmethod

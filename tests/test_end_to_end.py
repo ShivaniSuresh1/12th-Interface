@@ -94,3 +94,32 @@ def test_enough_checkins_turn_off_cold_start():
 
     planner.handle_checkin(response="tired")
     assert planner.profile.cold_start is False
+
+
+def test_resolution_forwards_edited_change():
+    planner = StudySessionPlanner(student_id="s1")
+    proposal = _proposal({"task_type": "review"})
+    edit = {"task_type": "reading"}
+    fake = ReplanResolution(proposal=proposal, outcome="edited", edited_change=edit)
+
+    with patch(
+        "integration.planner.resolve_proposal", return_value=fake
+    ) as resolve, patch.object(planner.task_mapping, "record_choice") as record:
+        planner.handle_resolution(proposal, "reading", edited_change=edit)
+
+    resolve.assert_called_once_with(proposal, "reading", edited_change=edit)
+    assert record.call_args.args[1] == TaskType.READING
+
+
+def test_stale_checkin_is_ignored():
+    from dataclasses import replace
+    from datetime import timedelta
+
+    planner = StudySessionPlanner(student_id="s1")
+    planner.handle_checkin(response="tired")
+    fresh = planner.profile.energy_history[-1]
+    assert planner._current_energy() is fresh
+
+    stale = replace(fresh, timestamp=fresh.timestamp - timedelta(hours=3))
+    planner.profile.energy_history[-1] = stale
+    assert planner._current_energy() is not stale
