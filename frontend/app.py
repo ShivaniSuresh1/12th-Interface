@@ -1,7 +1,8 @@
 
-import streamlit as st
+from datetime import datetime
+
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+import streamlit as st
 
 # ==========================================================
 # PAGE CONFIGURATION
@@ -401,17 +402,17 @@ def make_chart_layout(fig, height=300):
         height=height,
         paper_bgcolor="#191A29",
         plot_bgcolor="#191A29",
-        font=dict(color="#B8B0CA", size=11),
-        margin=dict(l=20, r=20, t=30, b=25),
-        legend=dict(
-            orientation="h",
-            y=1.12,
-            x=0
-        ),
-        hoverlabel=dict(
-            bgcolor="#28243A",
-            font_color="#FFFFFF"
-        ),
+        font={"color": "#B8B0CA", "size": 11},
+        margin={"l": 20, "r": 20, "t": 30, "b": 25},
+        legend={
+            "orientation": "h",
+            "y": 1.12,
+            "x": 0
+        },
+        hoverlabel={
+            "bgcolor": "#28243A",
+            "font_color": "#FFFFFF"
+        },
     )
     fig.update_xaxes(
         showgrid=False,
@@ -615,7 +616,7 @@ if page == "Home":
             height=220,
             paper_bgcolor="#191A29",
             font_color="#F4F0FF",
-            margin=dict(l=30, r=30, t=25, b=10)
+            margin={"l": 30, "r": 30, "t": 25, "b": 10}
         )
 
         st.plotly_chart(gauge, use_container_width=True)
@@ -787,14 +788,13 @@ elif page == "My Schedule":
         for index, item in enumerate(st.session_state.schedule):
             schedule_card(item)
 
-            if item["status"] != "Completed":
-                if st.button(
-                    f"Mark completed",
-                    key=f"complete_{index}"
-                ):
-                    st.session_state.schedule[index]["status"] = "Completed"
-                    st.session_state.completed_sessions += 1
-                    st.rerun()
+            if item["status"] != "Completed" and st.button(
+                "Mark completed",
+                key=f"complete_{index}"
+            ):
+                st.session_state.schedule[index]["status"] = "Completed"
+                st.session_state.completed_sessions += 1
+                st.rerun()
 
     with right:
         st.markdown(
@@ -894,8 +894,8 @@ elif page == "Insights":
         y=[55, 78, 65, 45, 70, 62, 48],
         mode="lines+markers",
         name="Energy",
-        line=dict(color="#A78BFA", width=3, shape="spline"),
-        marker=dict(size=8, color="#C4A7FF"),
+        line={"color": "#A78BFA", "width": 3, "shape": "spline"},
+        marker={"size": 8, "color": "#C4A7FF"},
         fill="tozeroy",
         fillcolor="rgba(167,139,250,0.10)"
     ))
@@ -943,10 +943,10 @@ elif page == "Insights":
             labels=["Completed", "Remaining"],
             values=[8, 4],
             hole=0.68,
-            marker=dict(
-                colors=["#A78BFA", "#343247"],
-                line=dict(color="#191A29", width=3)
-            ),
+            marker={
+                "colors": ["#A78BFA", "#343247"],
+                "line": {"color": "#191A29", "width": 3}
+            },
             textinfo="label+percent"
         ))
 
@@ -955,7 +955,7 @@ elif page == "Insights":
             paper_bgcolor="#191A29",
             plot_bgcolor="#191A29",
             font_color="#F4F0FF",
-            margin=dict(l=10, r=10, t=20, b=10),
+            margin={"l": 10, "r": 10, "t": 20, "b": 10},
             showlegend=False
         )
 
@@ -986,7 +986,7 @@ elif page == "Insights":
         name="Energy",
         yaxis="y2",
         mode="lines+markers",
-        line=dict(color="#C4A7FF", width=3)
+        line={"color": "#C4A7FF", "width": 3}
     ))
 
     sleep_chart.update_layout(
@@ -994,18 +994,18 @@ elif page == "Insights":
         paper_bgcolor="#191A29",
         plot_bgcolor="#191A29",
         font_color="#B8B0CA",
-        margin=dict(l=20, r=20, t=35, b=25),
-        yaxis=dict(
-            title="Sleep hours",
-            gridcolor="#302F43"
-        ),
-        yaxis2=dict(
-            title="Energy %",
-            overlaying="y",
-            side="right",
-            range=[0, 100]
-        ),
-        legend=dict(orientation="h", y=1.15)
+        margin={"l": 20, "r": 20, "t": 35, "b": 25},
+        yaxis={
+            "title": "Sleep hours",
+            "gridcolor": "#302F43"
+        },
+        yaxis2={
+            "title": "Energy %",
+            "overlaying": "y",
+            "side": "right",
+            "range": [0, 100]
+        },
+        legend={"orientation": "h", "y": 1.15}
     )
 
     st.plotly_chart(
