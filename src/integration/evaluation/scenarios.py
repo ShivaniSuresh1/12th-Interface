@@ -5,12 +5,11 @@ their schedule, an optional check-in answer, and an optional disruption.
 The harness runs it through StudySessionPlanner and shows the participant
 the result.
 
-PLACEHOLDER_SCENARIOS below are stand-ins so the harness can be built and
-tested now. Replace them with the team's real scenarios in Phase 2:
-
-- Shivani:   sleep (sleep_start / wake) and check-in answer
-- Vyshnavi:  the study sessions' tasks (title + task_type) and any survey answers
-- Soumyadip: the disruption trigger, e.g. "fatigue", "meeting_ran_late:20", "missed_session"
+PILOT_SCENARIOS are the six scenarios for the pilot. Together they cover:
+rested / short night / evening energy, a check-in that disagrees with the
+sleep estimate, all four task types, a survey preference, and every replan
+path (move, shorten or defer, ask). To change one, edit it here and run
+`python -m integration.evaluation preview` to check both conditions.
 """
 
 from __future__ import annotations
@@ -60,48 +59,71 @@ def _study(session_id: str, title: str, task_type: str, start: datetime, end: da
     }
 
 
-PLACEHOLDER_SCENARIOS: list[Scenario] = [
+PILOT_SCENARIOS: list[Scenario] = [
+    # Order matters: assign() splits alternating items into two sets, so each set
+    # gets 1 recommendation-only scenario + 2 replan proposals.
     Scenario(
-        scenario_id="p1_rested_morning",
+        scenario_id="s1_rested_morning",
         story=(
-            "It's 10:00 AM. You slept about 8 hours last night and have a free "
-            "morning before a problem set session."
+            "It's 9:30 AM on a weekday. You slept about 8 hours (11:30 PM to 7:30 AM) and "
+            "have a physics problem set planned for 9:30-11:00. You haven't checked in yet."
         ),
-        now=at(10),
+        now=at(9, 30),
         sleep_start=at(23, 30, day_offset=-1),
         wake=at(7, 30),
-        events=[_study("s1", "Algorithms problem set", "problem_set", at(10), at(11, 30))],
+        events=[_study("s1", "Physics problem set", "problem_set", at(9, 30), at(11))],
     ),
     Scenario(
-        scenario_id="p2_short_sleep_tired",
+        scenario_id="s2_evening_survey_preference",
         story=(
-            "It's 2:00 PM. You only slept about 5 hours. When the app asked how you "
-            'feel, you answered "pretty tired".'
+            "It's 8:00 PM. You slept about 7 hours. When you set up the app, you said that "
+            "when you're tired you'd rather grind through problem sets than read. You answer "
+            'the check-in with "exhausted". Up next: statistics homework, 8:00-9:00 PM.'
+        ),
+        now=at(20),
+        sleep_start=at(0, 30),
+        wake=at(7, 30),
+        checkin="exhausted",
+        survey={"low": "problem_set"},
+        events=[_study("s1", "Statistics homework", "problem_set", at(20), at(21))],
+    ),
+    Scenario(
+        scenario_id="s3_short_night_fatigue",
+        story=(
+            "It's 2:00 PM. You only slept about 5 hours (2:30 AM to 7:30 AM). You're about "
+            'to start a 2:00-3:00 PM biology reading session and tell the app "I\'m '
+            'exhausted, I can\'t focus".'
         ),
         now=at(14),
         sleep_start=at(2, 30),
         wake=at(7, 30),
-        checkin="pretty tired",
-        events=[_study("s1", "Biology reading", "reading", at(14), at(15))],
-    ),
-    Scenario(
-        scenario_id="p3_fatigue_midsession",
-        story=(
-            "It's 3:00 PM, partway through a long problem set session. You slept about "
-            '6 hours. You tell the app "I\'m tired".'
-        ),
-        now=at(15),
-        sleep_start=at(1, 30),
-        wake=at(7, 30),
-        checkin="tired",
+        checkin="exhausted",
         disruption="fatigue",
-        events=[_study("s1", "Linear algebra problem set", "problem_set", at(14, 30), at(16))],
+        events=[
+            _study("s1", "Biology reading", "reading", at(14), at(15)),
+            {"kind": "class", "title": "Chemistry lab", "start": at(16), "end": at(18)},
+        ],
     ),
     Scenario(
-        scenario_id="p4_meeting_ran_late",
+        scenario_id="s4_signals_disagree_ask",
         story=(
-            "It's 4:20 PM. Your group meeting was supposed to end at 4:00 but ran 20 "
-            "minutes late, and a review session was planned for 4:00-5:00."
+            "It's 4:00 PM. You slept about 8.5 hours. At the start of your exam review "
+            'session you told the app you feel "good", but 10 minutes in you tap '
+            '"I\'m tired".'
+        ),
+        now=at(16, 10),
+        sleep_start=at(23, 0, day_offset=-1),
+        wake=at(7, 30),
+        checkin="good",
+        disruption="fatigue",
+        events=[_study("s1", "Exam review", "review", at(16), at(17))],
+    ),
+    Scenario(
+        scenario_id="s5_meeting_ran_late",
+        story=(
+            "It's 4:20 PM. Your group project meeting was supposed to end at 4:00 but ran "
+            "20 minutes late. You had a data structures problem set planned for 4:00-5:00, "
+            'and an evening lecture at 6:00. You check in as "fine".'
         ),
         now=at(16, 20),
         sleep_start=at(23, 30, day_offset=-1),
@@ -109,16 +131,17 @@ PLACEHOLDER_SCENARIOS: list[Scenario] = [
         checkin="fine",
         disruption="meeting_ran_late:20",
         events=[
-            {"kind": "meeting", "title": "Group meeting", "start": at(15), "end": at(16)},
-            _study("s1", "Exam review", "review", at(16), at(17)),
-            {"kind": "class", "title": "Evening lab", "start": at(18), "end": at(20)},
+            {"kind": "meeting", "title": "Group project meeting", "start": at(15), "end": at(16)},
+            _study("s1", "Data structures problem set", "problem_set", at(16), at(17)),
+            {"kind": "class", "title": "Evening lecture", "start": at(18), "end": at(19, 30)},
         ],
     ),
     Scenario(
-        scenario_id="p5_missed_session",
+        scenario_id="s6_missed_session",
         story=(
-            "It's 1:00 PM. You missed this morning's 10-11 AM flashcard session because "
-            "an errand took longer than expected."
+            "It's 1:00 PM. You slept about 8 hours. You missed this morning's 10:00-11:00 "
+            "Spanish vocab flashcards session because an errand took longer than expected, "
+            "and you have a lecture from 2:00-3:30."
         ),
         now=at(13),
         sleep_start=at(0),
@@ -128,19 +151,5 @@ PLACEHOLDER_SCENARIOS: list[Scenario] = [
             _study("s1", "Spanish vocab flashcards", "memorization", at(10), at(11)),
             {"kind": "class", "title": "Lecture", "start": at(14), "end": at(15, 30)},
         ],
-    ),
-    Scenario(
-        scenario_id="p6_evening_survey_pref",
-        story=(
-            "It's 8:00 PM. You slept about 7 hours. During onboarding you said that "
-            "when you're tired you'd rather do problem sets than reading. You answer "
-            'the check-in with "exhausted".'
-        ),
-        now=at(20),
-        sleep_start=at(0, 30),
-        wake=at(7, 30),
-        checkin="exhausted",
-        survey={"low": "problem_set"},
-        events=[_study("s1", "Statistics homework", "problem_set", at(20), at(21))],
     ),
 ]

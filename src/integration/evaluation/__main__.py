@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .log import LOG_DIR, SessionLog
 from .present import CONDITIONS, assign, decision_target, render
-from .scenarios import PLACEHOLDER_SCENARIOS, Scenario
+from .scenarios import PILOT_SCENARIOS, Scenario
 from .simulate import run_scenario
 
 DECISIONS = {"a": "accept", "e": "edit", "r": "reject"}
@@ -125,9 +125,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.command == "preview":
-        preview(PLACEHOLDER_SCENARIOS)
+        preview(PILOT_SCENARIOS)
     else:
-        run_session(args.participant, PLACEHOLDER_SCENARIOS)
+        run_session(args.participant, PILOT_SCENARIOS)
 
 
 if __name__ == "__main__":

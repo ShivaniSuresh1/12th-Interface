@@ -10,10 +10,10 @@ from domain_model import TaskType
 from integration.evaluation.__main__ import run_session
 from integration.evaluation.log import FIELDS, SessionLog, log_path
 from integration.evaluation.present import assign, plain_change, render
-from integration.evaluation.scenarios import PLACEHOLDER_SCENARIOS
+from integration.evaluation.scenarios import PILOT_SCENARIOS
 from integration.evaluation.simulate import run_scenario
 
-SCENARIOS = PLACEHOLDER_SCENARIOS
+SCENARIOS = PILOT_SCENARIOS
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.scenario_id)
