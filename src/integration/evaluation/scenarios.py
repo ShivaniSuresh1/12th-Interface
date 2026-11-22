@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 # All placeholder scenarios happen on the same (arbitrary) Monday.
-DAY = datetime(2026, 11, 23)  # noqa: DTZ001 -- naive = student local time, as in user_model
+DAY = datetime(2026, 11, 23)
 
 
 def at(hour: int, minute: int = 0, day_offset: int = 0) -> datetime:
