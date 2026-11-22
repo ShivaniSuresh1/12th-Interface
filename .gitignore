@@ -7,3 +7,6 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# Evaluation participant data (never commit)
+eval_logs/

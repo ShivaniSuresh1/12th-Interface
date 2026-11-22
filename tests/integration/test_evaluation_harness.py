@@ -1,5 +1,6 @@
 """Evaluation harness: deterministic output, fair conditions, counterbalancing."""
 
+import csv
 from collections import Counter
 from datetime import datetime
 
@@ -7,6 +8,7 @@ import pytest
 
 from domain_model import TaskType
 from integration.evaluation.__main__ import run_session
+from integration.evaluation.log import FIELDS, SessionLog, log_path
 from integration.evaluation.present import assign, plain_change, render
 from integration.evaluation.scenarios import PLACEHOLDER_SCENARIOS
 from integration.evaluation.simulate import run_scenario
@@ -77,9 +79,74 @@ def test_counterbalancing_over_four_participants():
     assert set(explained.values()) == {2}
 
 
-def test_session_records_one_decision_per_scenario(capsys):
-    answers = iter(["x", "a", "e", "r", "a", "a", "r"])  # "x" is invalid, re-asked
-    results = run_session(2, SCENARIOS, input_fn=lambda _prompt: next(answers))
-    assert [r["decision"] for r in results] == ["accept", "edit", "reject", "accept", "accept", "reject"]
-    assert [r["position"] for r in results] == list(range(1, 7))
-    assert "Please type a, e, or r." in capsys.readouterr().out
+def _answers(*values):
+    it = iter(values)
+    return lambda _prompt: next(it)
+
+
+# Per scenario: decision, [edit note if "e"], trust, confidence.
+SESSION_ANSWERS = (
+    "x", "a", "5", "6",            # "x" is invalid and gets re-asked
+    "e", "make it shorter", "9", "3", "4",  # "9" is out of range and gets re-asked
+    "r", "2", "6",
+    "a", "7", "7",
+    "a", "6", "5",
+    "r", "1", "7",
+)
+
+
+def _fake_clock():
+    ticks = iter(range(0, 1000, 2))  # each call is 2 "seconds" later
+    return lambda: float(next(ticks))
+
+
+def test_session_logs_every_answer(tmp_path, capsys):
+    rows = run_session(
+        2, SCENARIOS, input_fn=_answers(*SESSION_ANSWERS), log_dir=tmp_path, clock=_fake_clock()
+    )
+    assert [r["decision"] for r in rows] == ["accept", "edit", "reject", "accept", "accept", "reject"]
+    assert [r["trust"] for r in rows] == [5, 3, 2, 7, 6, 1]
+    assert [r["confidence"] for r in rows] == [6, 4, 6, 7, 5, 7]
+    assert rows[1]["edit_note"] == "make it shorter"
+    assert all(r["decision_time_s"] == 2.0 for r in rows)
+    out = capsys.readouterr().out
+    assert "Please type a, e, or r." in out
+    assert "Please type a whole number from 1 to 7." in out
+
+    with log_path(2, tmp_path).open(newline="") as f:
+        saved = list(csv.DictReader(f))
+    assert len(saved) == 6
+    assert set(saved[0]) == set(FIELDS)
+    assert [r["scenario_id"] for r in saved] == [r["scenario_id"] for r in rows]
+
+
+def test_log_records_what_was_decided_on(tmp_path):
+    by_id = {s.scenario_id: s for s in SCENARIOS}
+    rows = run_session(
+        1, SCENARIOS, input_fn=_answers(*SESSION_ANSWERS),
+        log_dir=tmp_path, clock=_fake_clock(),
+    )
+    for r in rows:
+        has_disruption = by_id[r["scenario_id"]].disruption is not None
+        assert r["decided_on"] == ("proposal" if has_disruption else "recommendation")
+        assert (r["proposal_action"] != "") == has_disruption
+
+
+def test_rows_survive_a_session_that_quits_early(tmp_path):
+    def quit_on_second_scenario(prompt):
+        if quit_on_second_scenario.calls == 3:
+            raise KeyboardInterrupt
+        quit_on_second_scenario.calls += 1
+        return ["a", "5", "5"][quit_on_second_scenario.calls - 1]
+
+    quit_on_second_scenario.calls = 0
+    with pytest.raises(KeyboardInterrupt):
+        run_session(3, SCENARIOS, input_fn=quit_on_second_scenario, log_dir=tmp_path)
+    with log_path(3, tmp_path).open(newline="") as f:
+        assert len(list(csv.DictReader(f))) == 1
+
+
+def test_refuses_to_overwrite_an_existing_participant(tmp_path):
+    SessionLog(4, tmp_path).close()
+    with pytest.raises(FileExistsError):
+        SessionLog(4, tmp_path)
