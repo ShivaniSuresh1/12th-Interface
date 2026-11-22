@@ -6,8 +6,13 @@ From the repo root:
         Print every scenario in both conditions (for checking content).
 
     PYTHONPATH=src python -m integration.evaluation run --participant 3
-        Run one participant's session in their counterbalanced order.
-        Answers are saved to eval_logs/participant_03.csv as they go.
+        Run one participant's session in their counterbalanced order, then
+        the exit survey. Answers are saved as they go to
+        eval_logs/participant_03.csv and eval_logs/participant_03_survey.csv.
+
+    PYTHONPATH=src python -m integration.evaluation survey --participant 3
+        Run only the exit survey (e.g. if a session was interrupted after
+        the scenarios).
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from .log import LOG_DIR, SessionLog
 from .present import CONDITIONS, assign, decision_target, render
 from .scenarios import PILOT_SCENARIOS, Scenario
 from .simulate import run_scenario
+from .survey import run_survey
 
 DECISIONS = {"a": "accept", "e": "edit", "r": "reject"}
 RULE = "-" * 70
@@ -68,6 +74,7 @@ def run_session(
     input_fn: InputFn = input,
     log_dir: Path = LOG_DIR,
     clock: Callable[[], float] = time.monotonic,
+    with_survey: bool = True,
 ) -> list[dict]:
     sequence = assign(participant, scenarios)
     rows = []
@@ -112,6 +119,8 @@ def run_session(
             log.write(row)
             rows.append(row)
             print()
+    if with_survey:
+        run_survey(participant, input_fn, log_dir)
     print("Done, thank you!")
     return rows
 
@@ -122,10 +131,15 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("preview", help="print every scenario in both conditions")
     run = sub.add_parser("run", help="run one participant's session")
     run.add_argument("--participant", type=int, required=True, help="1, 2, 3, ...")
+    survey = sub.add_parser("survey", help="run only the exit survey")
+    survey.add_argument("--participant", type=int, required=True, help="1, 2, 3, ...")
     args = parser.parse_args(argv)
 
     if args.command == "preview":
         preview(PILOT_SCENARIOS)
+    elif args.command == "survey":
+        run_survey(args.participant)
+        print("Done, thank you!")
     else:
         run_session(args.participant, PILOT_SCENARIOS)
 

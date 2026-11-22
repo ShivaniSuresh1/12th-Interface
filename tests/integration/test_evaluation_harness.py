@@ -12,6 +12,7 @@ from integration.evaluation.log import FIELDS, SessionLog, log_path
 from integration.evaluation.present import assign, plain_change, render
 from integration.evaluation.scenarios import PILOT_SCENARIOS
 from integration.evaluation.simulate import run_scenario
+from integration.evaluation.survey import QUESTIONS, run_survey, survey_path
 
 SCENARIOS = PILOT_SCENARIOS
 
@@ -102,7 +103,8 @@ def _fake_clock():
 
 def test_session_logs_every_answer(tmp_path, capsys):
     rows = run_session(
-        2, SCENARIOS, input_fn=_answers(*SESSION_ANSWERS), log_dir=tmp_path, clock=_fake_clock()
+        2, SCENARIOS, input_fn=_answers(*SESSION_ANSWERS), log_dir=tmp_path, clock=_fake_clock(),
+        with_survey=False,
     )
     assert [r["decision"] for r in rows] == ["accept", "edit", "reject", "accept", "accept", "reject"]
     assert [r["trust"] for r in rows] == [5, 3, 2, 7, 6, 1]
@@ -124,7 +126,7 @@ def test_log_records_what_was_decided_on(tmp_path):
     by_id = {s.scenario_id: s for s in SCENARIOS}
     rows = run_session(
         1, SCENARIOS, input_fn=_answers(*SESSION_ANSWERS),
-        log_dir=tmp_path, clock=_fake_clock(),
+        log_dir=tmp_path, clock=_fake_clock(), with_survey=False,
     )
     for r in rows:
         has_disruption = by_id[r["scenario_id"]].disruption is not None
@@ -150,3 +152,36 @@ def test_refuses_to_overwrite_an_existing_participant(tmp_path):
     SessionLog(4, tmp_path).close()
     with pytest.raises(FileExistsError):
         SessionLog(4, tmp_path)
+
+
+# One valid answer per survey question: 6 Likert, 1 choice, 2 free text.
+SURVEY_ANSWERS = ("6", "5", "7", "6", "8", "7", "4", "1", "the 41% felt odd", "")
+
+
+def test_survey_saves_one_row_per_question(tmp_path, capsys):
+    answers = run_survey(5, input_fn=_answers(*SURVEY_ANSWERS), log_dir=tmp_path)
+    assert answers["trust_with_why"] == "7"  # "8" was out of range and re-asked
+    assert answers["preferred_version"] == "with explanation"
+    assert answers["confusing"] == "the 41% felt odd"
+    assert answers["change_one_thing"] == ""  # Enter skips a free-text question
+    assert "Please type a whole number from 1 to 7." in capsys.readouterr().out
+
+    with survey_path(5, tmp_path).open(newline="") as f:
+        saved = list(csv.DictReader(f))
+    assert [r["question_id"] for r in saved] == [q.question_id for q in QUESTIONS]
+
+
+def test_full_session_ends_with_the_survey(tmp_path):
+    scenario_answers = ("a", "5", "5") * len(SCENARIOS)
+    run_session(
+        6, SCENARIOS, input_fn=_answers(*scenario_answers, *SURVEY_ANSWERS),
+        log_dir=tmp_path, clock=_fake_clock(),
+    )
+    assert log_path(6, tmp_path).exists()
+    assert survey_path(6, tmp_path).exists()
+
+
+def test_survey_refuses_to_overwrite(tmp_path):
+    run_survey(7, input_fn=_answers(*SURVEY_ANSWERS), log_dir=tmp_path)
+    with pytest.raises(FileExistsError):
+        run_survey(7, input_fn=_answers(*SURVEY_ANSWERS), log_dir=tmp_path)
