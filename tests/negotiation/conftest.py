@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-DAY = datetime(2026, 10, 28)
+DAY = datetime(2026, 10, 28)  # noqa: DTZ001 -- naive = local time, like real schedules
 
 
 def at(hour: int, minute: int = 0) -> datetime:

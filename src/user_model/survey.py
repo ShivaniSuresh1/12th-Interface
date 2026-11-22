@@ -34,7 +34,7 @@ def apply_sleep_survey(
             f"typical_sleep_hours must be in [0, {MAX_SURVEY_SLEEP_HOURS}], "
             f"got {typical_sleep_hours}"
         )
-    now = as_aware(now or datetime.now())
+    now = as_aware(now or datetime.now())  # noqa: DTZ005 -- as_aware() treats it as local time
 
     if profile.sleep_hours is None:
         profile.sleep_hours = typical_sleep_hours

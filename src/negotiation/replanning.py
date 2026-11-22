@@ -90,7 +90,7 @@ def _now(reference: datetime | None = None) -> datetime:
     """Current time, naive or aware to match `reference`. Patched in tests."""
     if reference is not None and reference.tzinfo is not None:
         return datetime.now(reference.tzinfo)
-    return datetime.now()
+    return datetime.now()  # noqa: DTZ005 -- naive on purpose, to match a naive reference
 
 
 def _parse_trigger(trigger: str) -> tuple[str | None, timedelta | None]:
