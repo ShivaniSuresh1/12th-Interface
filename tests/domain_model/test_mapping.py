@@ -22,6 +22,13 @@ def test_cold_start_uses_default_rule(energy, expected):
     assert "default" in why
 
 
+def test_default_explanation_grammar():
+    _, why = recommend_task_type(StudentTaskMapping("s1"), HIGH)
+    assert why.startswith("because problem sets are the starting default")
+    _, why = recommend_task_type(StudentTaskMapping("s1"), MEDIUM)
+    assert why.startswith("because review is the starting default")
+
+
 @pytest.mark.parametrize(
     ("energy", "bucket_type"),
     [

@@ -71,6 +71,26 @@ task, why = recommend_task(mapping, energy_level=0.3, tasks=todays_tasks)
 - **Negotiation & Replanning** (Soumyadip) — every accept/edit/reject of a
   proposed task is a labeled example that updates `StudentTaskMapping`.
 
+## Pilot dry-run (Phase 1)
+
+[`PILOT_RECOMMENDATIONS.md`](PILOT_RECOMMENDATIONS.md) records the real
+`recommend_task_type()` output for each of Shivani's energy scenarios
+(`tests/user_model/scenarios.py`) and for the harness's `PILOT_SCENARIOS`,
+with sanity checks for near-ties and energies close to a cut point.
+`tests/domain_model/test_pilot_recommendations.py` pins the results.
+Regenerate after changing this module, the scenarios or the harness:
+
+```bash
+PYTHONPATH=src python -m tests.domain_model.pilot_recommendations
+```
+
+The harness can use the set directly:
+
+```python
+from tests.domain_model.pilot_recommendations import pilot_set
+pilot_set()  # one dict per scenario: energy inputs + recommended_task_type, why, explanation_source
+```
+
 ## TODO
 
 - [x] Finalize the fixed taxonomy (`TaskType` enum) — problem sets, reading,
@@ -80,11 +100,11 @@ task, why = recommend_task(mapping, energy_level=0.3, tasks=todays_tasks)
 - [x] Implement the per-student weighted lookup / decaying blend (Q4)
 - [x] Implement the default energy→task rule used during cold start (Q2)
 - [x] Implement the one-sentence explanation generator
-- [ ] Agree with Shivani on the bucket cut points (a well-rested student sits
-      around 0.62–0.69, so "high" mostly fires in the morning) — any change
-      must also update `negotiation.replanning.LOW_ENERGY` / `HIGH_ENERGY`
-- [ ] Agree with Shivani where the onboarding survey runs; task-preference
-      answers plug in here via `StudentTaskMapping.from_survey(...)`
+- [x] Bucket cut points: keep 0.33 / 0.66 (agreed on #6; Shivani recalibrated
+      the energy curve in #7 instead)
+- [x] Survey split agreed: sleep/schedule in `user_model.apply_sleep_survey`,
+      task preferences here via `StudentTaskMapping.from_survey(...)`
+- [x] Pilot dry-run: real recommendations for the pilot scenarios
 - [ ] Persist survey answers and choice counts (they are plain attributes, not
       contract fields, so they aren't saved with the dataclass yet)
 - [ ] Tune `PRIOR_STRENGTH` against real study-scenario data (Nov 20 milestone)
