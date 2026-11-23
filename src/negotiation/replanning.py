@@ -87,10 +87,14 @@ class ReplanResolution:
 
 
 def _now(reference: datetime | None = None) -> datetime:
-    """Current time, naive or aware to match `reference`. Patched in tests."""
+    """Current time, naive or aware to match `reference`. Patched in tests.
+
+    Naive schedules are the student's local wall-clock time (same rule as
+    user_model), so the naive "now" is local time with the zone dropped.
+    """
     if reference is not None and reference.tzinfo is not None:
         return datetime.now(reference.tzinfo)
-    return datetime.now()
+    return datetime.now().astimezone().replace(tzinfo=None)
 
 
 def _parse_trigger(trigger: str) -> tuple[str | None, timedelta | None]:

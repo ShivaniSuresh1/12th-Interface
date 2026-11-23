@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -233,3 +233,24 @@ def test_training_example_feeds_domain_model(proposal):
     example = training_example(resolve_proposal(proposal, "accept"))
     mapping.record_choice(example["energy_level"], TaskType(example["chosen_task_type"]))
     assert mapping.preferences["low"] == TaskType.PROBLEM_SET
+
+
+# --- clock -------------------------------------------------------------
+
+
+def test_now_is_naive_local_time_for_naive_schedules():
+    from negotiation.replanning import _now
+
+    now = _now(at(14))
+    assert now.tzinfo is None
+    assert abs(now - datetime.now().astimezone().replace(tzinfo=None)) < timedelta(seconds=5)
+    assert _now().tzinfo is None
+
+
+def test_now_matches_an_aware_schedules_zone():
+    from negotiation.replanning import _now
+
+    reference = at(14).replace(tzinfo=timezone(timedelta(hours=-6)))
+    now = _now(reference)
+    assert now.utcoffset() == timedelta(hours=-6)
+    assert abs(now - datetime.now(UTC)) < timedelta(seconds=5)
