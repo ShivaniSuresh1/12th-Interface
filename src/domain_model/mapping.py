@@ -237,8 +237,9 @@ def _explain(
     if source == "survey":
         reason = f"because you said you prefer {task_type.label} when {phrase}"
     else:
+        verb = "are" if task_type is TaskType.PROBLEM_SET else "is"  # "problem sets" is plural
         reason = (
-            f"because {task_type.label} is the starting default when {phrase}, "
+            f"because {task_type.label} {verb} the starting default when {phrase}, "
             f"until I learn what you prefer"
         )
     if learned is not None and learned != task_type:
