@@ -45,11 +45,32 @@ def test_energy_is_not_near_a_bucket_cut_point(scenario):
 
 
 def test_survey_scenario_uses_the_survey_explanation():
-    # s2 exists to show a survey-based explanation; it only works in the low bucket.
-    (s2,) = [s for s in SCENARIOS if s.scenario_id == "s2_evening_survey_preference"]
+    # s2 exists to show a survey-based explanation.
+    (s2,) = [s for s in SCENARIOS if s.scenario_id == "s2_survey_preference"]
     out = run_scenario(s2)
-    assert out.energy_level < LOW_ENERGY
     assert "you said you prefer" in out.why
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.scenario_id)
+def test_energy_comes_from_shivanis_scenario(scenario):
+    # Each harness scenario reuses one of user_model's fixed energy scenarios, so
+    # participants see exactly the energy those scenarios pin down.
+    from tests.user_model.scenarios import SCENARIOS as ENERGY_SCENARIOS
+
+    (energy,) = [e for e in ENERGY_SCENARIOS if e.number == scenario.user_model_scenario]
+    assert scenario.now.time() == energy.time_of_day
+    assert scenario.sleep_hours == energy.sleep_hours
+    assert scenario.checkin == energy.checkin_response
+    out = run_scenario(scenario)
+    assert out.energy_level == round(energy.energy_level, 3)
+    assert out.energy_source == energy.source
+
+
+def test_every_energy_scenario_is_used_once():
+    from tests.user_model.scenarios import SCENARIOS as ENERGY_SCENARIOS
+
+    used = sorted(s.user_model_scenario for s in SCENARIOS)
+    assert used == sorted(e.number for e in ENERGY_SCENARIOS)
 
 
 def _session_task_type(scenario, title):

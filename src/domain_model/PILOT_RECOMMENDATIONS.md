@@ -108,15 +108,15 @@ separate stories from the six above.
 
 | Scenario | Student | Energy | Bucket | Recommendation | Source | Margin | Check |
 |---|---|---|---|---|---|---|---|
-| s1_rested_morning | new | 0.830 | high | problem sets | default rule | 1.00 | ok |
-| s2_evening_survey_preference | survey | 0.257 | low | problem sets | survey | 1.00 | ok |
+| s1_rested_morning | new | 0.782 | high | problem sets | default rule | 1.00 | ok |
+| s2_survey_preference | survey | 0.460 | medium | memorization | survey | 1.00 | ok |
 | s3_short_night_fatigue | new | 0.248 | low | reading | default rule | 1.00 | ok |
-| s4_signals_disagree_ask | new | 0.724 | high | problem sets | default rule | 1.00 | ok |
-| s5_meeting_ran_late | learned | 0.614 | medium | reading | learned choices | 0.13 | ok |
+| s4_signals_disagree_ask | new | 0.698 | high | problem sets | default rule | 1.00 | ok |
+| s5_meeting_ran_late | learned | 0.515 | medium | reading | learned choices | 0.13 | ok |
 | s6_missed_session | learned | 0.209 | low | memorization | learned choices | 0.41 | ok |
 
 - `s1_rested_morning`: because problem sets are the starting default when you're energized, until I learn what you prefer
-- `s2_evening_survey_preference`: because you said you prefer problem sets when you're tired
+- `s2_survey_preference`: because you said you prefer memorization when your energy is moderate
 - `s3_short_night_fatigue`: because reading is the starting default when you're tired, until I learn what you prefer
 - `s4_signals_disagree_ask`: because problem sets are the starting default when you're energized, until I learn what you prefer
 - `s5_meeting_ran_late`: because you picked reading in 4 of your 5 choices when your energy is moderate, which now outweighs the starting default

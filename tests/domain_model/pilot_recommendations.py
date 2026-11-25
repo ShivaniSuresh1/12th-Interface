@@ -40,7 +40,7 @@ def new_student() -> StudentTaskMapping:
 
 def survey_student() -> StudentTaskMapping:
     """Said in onboarding they'd rather do problem sets when tired (objective
-    answers), the design doc's example; same answer as the harness's s2."""
+    answers), the design doc's example. (The harness's s2 uses its own survey answer.)"""
     return StudentTaskMapping.from_survey("pilot_survey", {"low": "problem_set"})
 
 
