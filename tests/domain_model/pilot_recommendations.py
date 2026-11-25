@@ -40,7 +40,7 @@ def new_student() -> StudentTaskMapping:
 
 def survey_student() -> StudentTaskMapping:
     """Said in onboarding they'd rather do problem sets when tired (objective
-    answers), the design doc's example; same answer as the harness's s2."""
+    answers), the design doc's example. (The harness's s2 uses its own survey answer.)"""
     return StudentTaskMapping.from_survey("pilot_survey", {"low": "problem_set"})
 
 
@@ -143,7 +143,7 @@ def harness_rows() -> list[Row]:
         mapping = build_planner(scenario).task_mapping
         task_type, _, source, margin, issues = check(mapping, out.energy_level)
         assert task_type.value == out.recommended_task_type  # same function, same answer
-        student = "survey" if scenario.survey else "new"
+        student = "learned" if scenario.history else "survey" if scenario.survey else "new"
         rows.append(
             Row(
                 scenario.scenario_id, student, out.energy_level, _bucket(out.energy_level),
@@ -244,7 +244,7 @@ def render() -> str:
         "## What the harness shows live",
         "",
         "`integration.evaluation.PILOT_SCENARIOS` run through `run_scenario()` (frozen",
-        "clock, fresh or survey-seeded student), checked the same way. These are",
+        "clock; fresh, survey-seeded or learned student), checked the same way. These are",
         "separate stories from the six above.",
         "",
         *_table(harness_rows(), "Scenario"),
