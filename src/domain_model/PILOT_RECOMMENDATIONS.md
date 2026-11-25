@@ -109,7 +109,7 @@ separate stories from the six above.
 | Scenario | Student | Energy | Bucket | Recommendation | Source | Margin | Check |
 |---|---|---|---|---|---|---|---|
 | s1_rested_morning | new | 0.830 | high | problem sets | default rule | 1.00 | ok |
-| s2_evening_survey_preference | survey | 0.312 | low | problem sets | survey | 1.00 | energy 0.312 is within 0.03 of the 0.33 cut point |
+| s2_evening_survey_preference | survey | 0.257 | low | problem sets | survey | 1.00 | ok |
 | s3_short_night_fatigue | new | 0.248 | low | reading | default rule | 1.00 | ok |
 | s4_signals_disagree_ask | new | 0.724 | high | problem sets | default rule | 1.00 | ok |
 | s5_meeting_ran_late | new | 0.614 | medium | review | default rule | 1.00 | ok |

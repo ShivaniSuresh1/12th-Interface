@@ -15,10 +15,10 @@ path (move, shorten or defer, ask). To change one, edit it here and run
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 # All placeholder scenarios happen on the same (arbitrary) Monday.
-DAY = datetime(2026, 11, 23)
+DAY = datetime.combine(date(2026, 11, 23), time())
 
 
 def at(hour: int, minute: int = 0, day_offset: int = 0) -> datetime:
@@ -76,16 +76,16 @@ PILOT_SCENARIOS: list[Scenario] = [
     Scenario(
         scenario_id="s2_evening_survey_preference",
         story=(
-            "It's 8:00 PM. You slept about 7 hours. When you set up the app, you said that "
+            "It's 9:00 PM. You slept about 6 hours. When you set up the app, you said that "
             "when you're tired you'd rather grind through problem sets than read. You answer "
-            'the check-in with "exhausted". Up next: statistics homework, 8:00-9:00 PM.'
+            'the check-in with "exhausted". Up next: statistics homework, 9:00-10:00 PM.'
         ),
-        now=at(20),
-        sleep_start=at(0, 30),
+        now=at(21),
+        sleep_start=at(1, 30),
         wake=at(7, 30),
         checkin="exhausted",
         survey={"low": "problem_set"},
-        events=[_study("s1", "Statistics homework", "problem_set", at(20), at(21))],
+        events=[_study("s1", "Statistics homework", "problem_set", at(21), at(22))],
     ),
     Scenario(
         scenario_id="s3_short_night_fatigue",

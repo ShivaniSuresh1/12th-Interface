@@ -7,6 +7,7 @@ from datetime import datetime
 import pytest
 
 from domain_model import TaskType
+from domain_model.mapping import HIGH_ENERGY, LOW_ENERGY
 from integration.evaluation.__main__ import run_session
 from integration.evaluation.log import FIELDS, SessionLog, log_path
 from integration.evaluation.present import assign, plain_change, render
@@ -26,6 +27,29 @@ def test_every_scenario_runs_through_the_planner(scenario):
     assert out.has_proposal == (scenario.disruption is not None)
     if scenario.checkin:
         assert out.energy_source == "checkin_corrected"
+
+
+# How close a scenario's energy may sit to a bucket cut point. Closer than this and a
+# small change to the energy curve or check-in blend could flip its bucket, which
+# changes the recommendation and explanation participants see.
+CUT_POINT_MARGIN = 0.03
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.scenario_id)
+def test_energy_is_not_near_a_bucket_cut_point(scenario):
+    energy = run_scenario(scenario).energy_level
+    for cut in (LOW_ENERGY, HIGH_ENERGY):
+        assert abs(energy - cut) >= CUT_POINT_MARGIN, (
+            f"{scenario.scenario_id}: energy {energy:.3f} is within {CUT_POINT_MARGIN} of {cut}"
+        )
+
+
+def test_survey_scenario_uses_the_survey_explanation():
+    # s2 exists to show a survey-based explanation; it only works in the low bucket.
+    (s2,) = [s for s in SCENARIOS if s.scenario_id == "s2_evening_survey_preference"]
+    out = run_scenario(s2)
+    assert out.energy_level < LOW_ENERGY
+    assert "you said you prefer" in out.why
 
 
 def test_output_does_not_depend_on_the_real_clock():
