@@ -13,6 +13,12 @@ From the repo root:
     PYTHONPATH=src python -m integration.evaluation survey --participant 3
         Run only the exit survey (e.g. if a session was interrupted after
         the scenarios).
+
+    PYTHONPATH=src python -m integration.evaluation analyze [--out FILE]
+        Descriptive summary of every log so far (Markdown).
+
+Add --log-dir DIR to run/survey/analyze to keep a team dry-run out of the
+real pilot data, e.g. --log-dir eval_logs/dry_run.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from .analyze import report
 from .log import LOG_DIR, SessionLog
 from .present import CONDITIONS, assign, decision_target, render
 from .scenarios import PILOT_SCENARIOS, Scenario
@@ -133,15 +140,28 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--participant", type=int, required=True, help="1, 2, 3, ...")
     survey = sub.add_parser("survey", help="run only the exit survey")
     survey.add_argument("--participant", type=int, required=True, help="1, 2, 3, ...")
+    analyze = sub.add_parser("analyze", help="summarize the logs so far (Markdown)")
+    analyze.add_argument("--out", type=Path, help="write the report here instead of printing")
+    for p in (run, survey, analyze):
+        p.add_argument(
+            "--log-dir", type=Path, default=LOG_DIR, help=f"where logs live (default {LOG_DIR})"
+        )
     args = parser.parse_args(argv)
 
     if args.command == "preview":
         preview(PILOT_SCENARIOS)
     elif args.command == "survey":
-        run_survey(args.participant)
+        run_survey(args.participant, log_dir=args.log_dir)
         print("Done, thank you!")
+    elif args.command == "analyze":
+        text = report(args.log_dir)
+        if args.out:
+            args.out.write_text(text, encoding="utf-8")
+            print(f"wrote {args.out}")
+        else:
+            print(text, end="")
     else:
-        run_session(args.participant, PILOT_SCENARIOS)
+        run_session(args.participant, PILOT_SCENARIOS, log_dir=args.log_dir)
 
 
 if __name__ == "__main__":

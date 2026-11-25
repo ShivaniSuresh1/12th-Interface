@@ -40,6 +40,17 @@ import from the other three (`user_model`, `domain_model`, `negotiation`)
 Everyone — this is the integration seam for `user_model`, `domain_model`,
 and `negotiation`.
 
+## Evaluation harness (`evaluation/`)
+
+```bash
+PYTHONPATH=src python -m integration.evaluation preview                  # every scenario, both conditions
+PYTHONPATH=src python -m integration.evaluation run --participant 1      # one participant + exit survey
+PYTHONPATH=src python -m integration.evaluation analyze                  # descriptive report of all logs
+```
+
+How to run the team dry-run and the outside pilot (script, numbering, what to
+do if a session is interrupted): [`evaluation/PILOT_PROTOCOL.md`](evaluation/PILOT_PROTOCOL.md).
+
 ## TODO
 
 - [ ] Flesh out `StudySessionPlanner` once the other three modules'

@@ -52,6 +52,43 @@ def test_survey_scenario_uses_the_survey_explanation():
     assert "you said you prefer" in out.why
 
 
+def _session_task_type(scenario, title):
+    (event,) = [e for e in scenario.events if e.get("title") == title]
+    return event["task_type"]
+
+
+@pytest.mark.parametrize(
+    "scenario", [s for s in SCENARIOS if s.disruption], ids=lambda s: s.scenario_id
+)
+def test_recommendation_matches_the_session_being_changed(scenario):
+    # Found in the Phase 2 dry pass: s5/s6 recommended one task type while
+    # rescheduling a session of another type, which reads as a contradiction.
+    out = run_scenario(scenario)
+    change = out.proposed_change
+    if change["action"] == "ask":
+        return  # no session is changed
+    assert out.recommended_task_type == _session_task_type(scenario, change["title"])
+
+
+def test_every_explanation_source_is_shown():
+    whys = [run_scenario(s).why for s in SCENARIOS]
+    assert any("starting default" in w and "outweighs" not in w for w in whys)  # default rule
+    assert any("you said you prefer" in w for w in whys)  # survey answer
+    assert any("outweighs the starting default" in w for w in whys)  # learned choices
+
+
+def test_learned_history_matches_domain_models_learned_student():
+    from integration.evaluation.scenarios import LEARNED_HISTORY
+    from integration.evaluation.simulate import build_planner
+    from tests.domain_model.pilot_recommendations import learned_student
+
+    (s6,) = [s for s in SCENARIOS if s.scenario_id == "s6_missed_session"]
+    ours, theirs = build_planner(s6).task_mapping, learned_student()
+    for bucket in ("low", "medium", "high"):
+        assert ours.choice_counts(bucket) == theirs.choice_counts(bucket)
+    assert s6.history == LEARNED_HISTORY
+
+
 def test_output_does_not_depend_on_the_real_clock():
     # Same scenario, run twice: identical output (clock is frozen at scenario.now).
     assert run_scenario(SCENARIOS[1]) == run_scenario(SCENARIOS[1])
@@ -209,3 +246,56 @@ def test_survey_refuses_to_overwrite(tmp_path):
     run_survey(7, input_fn=_answers(*SURVEY_ANSWERS), log_dir=tmp_path)
     with pytest.raises(FileExistsError):
         run_survey(7, input_fn=_answers(*SURVEY_ANSWERS), log_dir=tmp_path)
+
+
+# -- analyze (Phase 2, step 7) ---------------------------------------------------
+
+
+def _four_participants(log_dir):
+    # One full counterbalancing cycle. Odd participants accept everything with
+    # trust 6; even participants reject everything with trust 2.
+    for participant in (1, 2, 3, 4):
+        decision, trust = ("a", "6") if participant % 2 else ("r", "2")
+        answers = (decision, trust, "4") * len(SCENARIOS)
+        run_session(
+            participant, SCENARIOS, input_fn=_answers(*answers, *SURVEY_ANSWERS),
+            log_dir=log_dir, clock=_fake_clock(),
+        )
+
+
+def test_analyze_summarizes_conditions_and_survey(tmp_path, capsys):
+    from integration.evaluation.analyze import load_rows, report, summarize
+
+    _four_participants(tmp_path)
+    rows = load_rows(tmp_path)
+    assert len(rows) == 4 * len(SCENARIOS)  # survey files are not read as sessions
+
+    for condition in ("explanation", "plain"):
+        s = summarize(r for r in rows if r["condition"] == condition)
+        assert s["n"] == 2 * len(SCENARIOS)  # each participant: half explained, half plain
+        assert s["accept"] == s["reject"] == 0.5
+        assert s["trust"] == 4.0
+        assert s["time_median"] == 2.0
+
+    text = report(tmp_path)
+    assert "Participants: 4 (1, 2, 3, 4)" in text
+    assert "| explanation | 12 | 50% | 0% | 50% | 4.00 |" in text
+    for scenario in SCENARIOS:
+        assert f"{scenario.scenario_id} / explanation" in text
+    assert "## Exit survey" in text
+
+
+def test_analyze_cli_reads_a_separate_log_dir(tmp_path, capsys):
+    from integration.evaluation.__main__ import main
+
+    _four_participants(tmp_path / "dry_run")
+    capsys.readouterr()
+    out = tmp_path / "report.md"
+    main(["analyze", "--log-dir", str(tmp_path / "dry_run"), "--out", str(out)])
+    assert "Participants: 4" in out.read_text()
+
+
+def test_analyze_with_no_logs(tmp_path):
+    from integration.evaluation.analyze import report
+
+    assert "No session logs found yet." in report(tmp_path)

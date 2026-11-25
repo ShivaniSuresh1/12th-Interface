@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from unittest.mock import patch
 
-from domain_model import StudentTaskMapping
+from domain_model import StudentTaskMapping, TaskType
 from integration.planner import StudySessionPlanner
 from user_model import StudentSchedule
 
@@ -69,7 +69,7 @@ def frozen_clock(now: datetime) -> Iterator[None]:
 
 
 def build_planner(scenario: Scenario) -> StudySessionPlanner:
-    """A planner whose student matches the scenario (sleep, schedule, survey)."""
+    """A planner whose student matches the scenario (sleep, schedule, survey, history)."""
     planner = StudySessionPlanner(student_id=scenario.scenario_id)
     planner.profile.sleep_hours = scenario.sleep_hours
     planner.profile.schedule = StudentSchedule(
@@ -79,6 +79,8 @@ def build_planner(scenario: Scenario) -> StudySessionPlanner:
         planner.task_mapping = StudentTaskMapping.from_survey(
             scenario.scenario_id, scenario.survey
         )
+    for energy_level, task_type in scenario.history or []:
+        planner.task_mapping.record_choice(energy_level, TaskType(task_type))
     return planner
 
 
