@@ -1,12 +1,13 @@
 """Dashboard API (Phase 3, step 8): UI words -> planner calls, schedule kept in sync."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
 from domain_model import TaskType
 from integration.dashboard import DISRUPTIONS, FEELINGS, DashboardSession, energy_label
 from integration.evaluation.simulate import frozen_clock
+from integration.storage import ProfileStore, student_id_for
 
 CST = timezone(timedelta(hours=-6))
 NOW = datetime(2026, 11, 25, 14, 0, tzinfo=CST)  # a Wednesday afternoon
@@ -121,3 +122,80 @@ def test_energy_curve_covers_the_day(session):
     curve = session.energy_curve()
     assert len(curve) == 15
     assert all(0 <= pct <= 100 for _t, pct in curve)
+
+
+# -- onboarding + saving (Phase 3, step 9) ----------------------------------------
+
+def _new_student(**prefs):
+    with frozen_clock(NOW):
+        return DashboardSession.onboard(
+            student_id="priya",
+            name="Priya",
+            typical_sleep_hours=6.0,
+            typical_wake_time=time(8, 0),
+            task_preferences={"low": None, "medium": None, "high": None, **prefs},
+            clock=lambda: NOW,
+        )
+
+
+def test_onboarding_uses_both_surveys():
+    s = _new_student(low=TaskType.MEMORIZATION)
+    assert s.name == "Priya"
+    assert s.planner.profile.sleep_hours == 6.0
+    sleep = [e for e in s.events if e["kind"] == "sleep"]
+    assert len(sleep) == 1 and sleep[0]["end"].hour == 8
+    lines = s.starting_suggestions()
+    assert len(lines) == 3
+    assert "memorization" in lines[0] and "you said" in lines[0]
+    assert s.schedule_items()  # gets a sample day to try things on
+
+
+def test_no_preference_keeps_the_default_rule():
+    lines = _new_student().starting_suggestions()
+    assert all("default" in line for line in lines)
+
+
+def test_save_and_load_round_trip(tmp_path):
+    s = _new_student(high=TaskType.READING)
+    with frozen_clock(NOW):
+        s.checkin("Tired")
+        s.start_task(TaskType.REVIEW.value)
+        first = s.schedule_items()[0]["session_id"]
+        s.mark_completed(first)
+        before = s.plan()
+
+        store = ProfileStore(tmp_path)
+        store.save(s)
+        assert store.students() == [("priya", "Priya")]
+        loaded = store.load("priya", clock=lambda: NOW)
+        after = loaded.plan()
+
+    assert loaded.name == "Priya"
+    assert after["energy_pct"] == before["energy_pct"]
+    assert after["task_type"] == before["task_type"] and after["why"] == before["why"]
+    assert loaded.schedule_items() == s.schedule_items()
+    assert loaded.active_task == TaskType.REVIEW.value
+    assert loaded.last_feeling == "Tired"
+    assert len(loaded.checkin_history()) == 1
+
+
+def test_a_new_day_gets_a_fresh_sample_schedule(tmp_path):
+    store = ProfileStore(tmp_path)
+    store.save(_new_student())
+    tomorrow = NOW + timedelta(days=1)
+    with frozen_clock(tomorrow):
+        loaded = store.load("priya", clock=lambda: tomorrow)
+        items = loaded.schedule_items()
+    assert items and {i["status"] for i in items} <= {"Missed", "Upcoming", "In progress", "Done"}
+    assert loaded.planner.task_mapping.to_dict() == _new_student().planner.task_mapping.to_dict()
+
+
+def test_student_ids_from_names():
+    assert student_id_for("Priya S.") == "priya-s"
+    with pytest.raises(ValueError):
+        student_id_for("  !! ")
+
+
+def test_unreadable_profile_files_are_skipped(tmp_path):
+    (tmp_path / "broken.json").write_text("{not json", encoding="utf-8")
+    assert ProfileStore(tmp_path).students() == []

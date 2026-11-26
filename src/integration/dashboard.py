@@ -16,11 +16,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 
-from domain_model import TaskType
+from domain_model import StudentTaskMapping, TaskType
 from domain_model.mapping import HIGH_ENERGY, LOW_ENERGY
+from domain_model.onboarding import recommendation_summary
 from negotiation import ReplanProposal, confirmation_message, resolve_answer
-from user_model import EnergyReport, StudentSchedule
+from user_model import EnergyReport, StudentProfile, StudentSchedule
 from user_model.energy_estimate import estimate_energy_at
+from user_model.survey import apply_sleep_survey
 
 from .planner import StudySessionPlanner
 
@@ -71,6 +73,9 @@ class DashboardSession:
     student_id: str = "demo"
     sleep_hours: float = 7.5
     clock: Callable[[], datetime] = now_local
+    name: str = ""
+    wake_time: time = DEFAULT_WAKE
+    sample_day: bool = True  # add the sample study day for today
     planner: StudySessionPlanner = field(init=False)
     completed: set[str] = field(default_factory=set)
     deferred: list[dict] = field(default_factory=list)  # moved to tomorrow
@@ -79,10 +84,107 @@ class DashboardSession:
     _next_id: int = 0
 
     def __post_init__(self) -> None:
+        self.name = self.name or self.student_id
         self.planner = StudySessionPlanner(student_id=self.student_id)
         self.planner.profile.schedule = StudentSchedule(self.student_id, events=[])
         self.set_sleep(self.sleep_hours)
-        self._add_demo_sessions()
+        if self.sample_day:
+            self._add_demo_sessions()
+
+    # -- onboarding (a new student's first run) -------------------------------
+
+    @classmethod
+    def onboard(
+        cls,
+        student_id: str,
+        name: str,
+        typical_sleep_hours: float,
+        typical_wake_time: time,
+        task_preferences: dict[str, TaskType | str | None],
+        clock: Callable[[], datetime] = now_local,
+    ) -> DashboardSession:
+        """Combined onboarding: Shivani's sleep questions + Vyshnavi's task preferences.
+
+        `task_preferences` maps "low" / "medium" / "high" to a TaskType, or None
+        for no preference (that bucket keeps the default rule).
+        """
+        session = cls(
+            student_id=student_id,
+            sleep_hours=typical_sleep_hours,
+            clock=clock,
+            name=name,
+            wake_time=typical_wake_time,
+            sample_day=False,
+        )
+        # user_model half: seeds sleep_hours and last night's sleep event.
+        profile = StudentProfile(student_id=student_id)
+        apply_sleep_survey(profile, typical_sleep_hours, typical_wake_time, now=clock())
+        session.planner.profile = profile
+        # domain_model half: survey answers become the recommendation prior.
+        answers = {b: t for b, t in task_preferences.items() if t}
+        session.planner.task_mapping = StudentTaskMapping.from_survey(student_id, answers)
+        session._add_demo_sessions()
+        return session
+
+    def starting_suggestions(self) -> list[str]:
+        """What the planner will suggest at each energy level (shown after onboarding)."""
+        return recommendation_summary(self.planner.task_mapping)
+
+    # -- saving between runs (Phase 3, step 9) --------------------------------
+
+    def to_dict(self) -> dict:
+        """JSON-safe snapshot: teammates' profile + mapping dicts, plus dashboard state."""
+        deferred = StudentSchedule(self.student_id, events=self.deferred).to_dict()["events"]
+        return {
+            "schema_version": 1,
+            "student_id": self.student_id,
+            "name": self.name,
+            "wake_time": self.wake_time.strftime("%H:%M"),
+            "profile": self.planner.profile.to_dict(),
+            "task_mapping": self.planner.task_mapping.to_dict(),
+            "completed": sorted(self.completed),
+            "deferred": deferred,
+            "active_task": self.active_task,
+            "last_feeling": self.last_feeling,
+            "next_id": self._next_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, clock: Callable[[], datetime] = now_local) -> DashboardSession:
+        if data.get("schema_version", 1) != 1:
+            raise ValueError(f"unsupported dashboard schema_version {data.get('schema_version')}")
+        profile = StudentProfile.from_dict(data["profile"])
+        session = cls(
+            student_id=data["student_id"],
+            sleep_hours=profile.sleep_hours if profile.sleep_hours is not None else 7.5,
+            clock=clock,
+            name=data.get("name", ""),
+            wake_time=time.fromisoformat(data.get("wake_time", "07:30")),
+            sample_day=False,
+        )
+        if profile.schedule is None:
+            profile.schedule = StudentSchedule(profile.student_id, events=[])
+        session.planner.profile = profile
+        session.planner.task_mapping = StudentTaskMapping.from_dict(data["task_mapping"])
+        session.completed = set(data.get("completed", []))
+        session.deferred = StudentSchedule.from_dict(
+            {"student_id": profile.student_id, "events": data.get("deferred", [])}
+        ).events
+        session.active_task = data.get("active_task")
+        session.last_feeling = data.get("last_feeling", "")
+        session._next_id = int(data.get("next_id", 0))
+        session.events.sort(key=lambda e: e["start"])
+        if not session.has_sessions_today():
+            session.sample_day = True
+            session._add_demo_sessions()  # a new day: fresh sample sessions
+        return session
+
+    def has_sessions_today(self) -> bool:
+        today = self.clock().date()
+        return any(
+            e["kind"] in ("study", "break") and e["start"].astimezone(self.clock().tzinfo).date() == today
+            for e in self.events
+        )
 
     # -- schedule ------------------------------------------------------------
 
@@ -145,6 +247,8 @@ class DashboardSession:
         for e in self.events:
             if e["kind"] not in ("study", "break"):
                 continue
+            if e["start"].astimezone(now.tzinfo).date() != now.date():
+                continue  # earlier days stay in the profile, not on today's card list
             sid = e["session_id"]
             if sid in self.completed:
                 status = "Completed"
@@ -173,7 +277,7 @@ class DashboardSession:
         """Last night's sleep, as a 'sleep' event ending at the usual wake time."""
         self.sleep_hours = float(hours)
         now = self.clock()
-        wake = datetime.combine(now.date(), DEFAULT_WAKE, tzinfo=now.tzinfo)
+        wake = datetime.combine(now.date(), self.wake_time, tzinfo=now.tzinfo)
         if wake > now:
             wake -= timedelta(days=1)
         sleep = {

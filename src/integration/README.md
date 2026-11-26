@@ -63,9 +63,19 @@ a thin, Streamlit-free API over `StudySessionPlanner`: sleep input, one-tap
 check-in, energy gauge + "why", today's schedule (add / complete), Study Mode
 (starting a task teaches the domain model), replanning with accept / keep, and
 the interactive "tell me what changed" flow (`negotiation.resolve_answer`).
-Accepted changes update the schedule. Tests: `tests/integration/test_dashboard.py`
-(always) and `test_dashboard_app.py` (clicks through the UI; skipped unless
-streamlit is installed). Persistence between runs is step 9.
+Accepted changes update the schedule.
+
+**First run / onboarding (step 9):** a new student answers Shivani's sleep
+questions (`apply_sleep_survey`) and Vyshnavi's task-preference questions
+(`StudentTaskMapping.from_survey`) on one screen, then sees the starting
+suggestions. Returning students pick their name. Everything is saved after
+each interaction to `profiles/<student_id>.json` (gitignored) by
+`integration.storage.ProfileStore`: the file holds `StudentProfile.to_dict()`
+and `StudentTaskMapping.to_dict()` unchanged, plus the dashboard's own state.
+
+Tests: `tests/integration/test_dashboard.py` (always) and
+`test_dashboard_app.py` (clicks through the UI; skipped unless streamlit is
+installed).
 
 ## TODO
 

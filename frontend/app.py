@@ -12,6 +12,7 @@ only illustrative data left is the weekly charts on the Insights page,
 and they are labelled as sample data.
 """
 
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +24,10 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from domain_model import TaskType
+from domain_model.onboarding import QUESTIONS as PREFERENCE_QUESTIONS
 from integration.dashboard import DISRUPTIONS, FEELINGS, DashboardSession
+from integration.storage import ProfileStore, student_id_for
+from user_model.survey import MAX_SURVEY_SLEEP_HOURS
 
 # ==========================================================
 # PAGE CONFIGURATION
@@ -368,14 +372,21 @@ hr {
 # SESSION STATE (the live backend lives here between reruns)
 # ==========================================================
 
-if "backend" not in st.session_state:
-    st.session_state.backend = DashboardSession(student_id="demo", sleep_hours=7.5)
+# Saved students live in <repo>/profiles/ (gitignored), one JSON file each.
+# TWELFTH_PROFILE_DIR overrides it (the UI tests use a temp folder).
+store = ProfileStore(
+    Path(os.environ.get("TWELFTH_PROFILE_DIR") or Path(__file__).resolve().parents[1] / "profiles")
+)
 
-for key, value in {"proposal": None, "replan_result": "", "page_notice": ""}.items():
+for key, value in {
+    "proposal": None,
+    "replan_result": "",
+    "page_notice": "",
+    "just_onboarded": False,
+}.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-backend: DashboardSession = st.session_state.backend
 TASK_TYPES = list(TaskType)
 
 
@@ -449,6 +460,124 @@ def completed_count():
 
 
 # ==========================================================
+# WELCOME / ONBOARDING (shown until a student is signed in)
+# ==========================================================
+
+def onboarding_screen():
+
+    st.markdown("""
+    <div class="welcome">
+        <div class="welcome-label">WELCOME</div>
+        <div class="welcome-title">Welcome to The 12th Interface</div>
+        <div class="welcome-description">
+            A study planner that works with your energy. Tell me a little about
+            your sleep and how you like to study, and I'll take it from there.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    new_tab, back_tab = st.tabs(["I'm new here", "I've been here before"])
+
+    with new_tab:
+        with st.form("onboarding_form"):
+
+            name = st.text_input("What should I call you?", placeholder="e.g. Priya")
+
+            st.markdown(
+                '<div class="section-heading">Your sleep</div>',
+                unsafe_allow_html=True
+            )
+            sleep_col, wake_col = st.columns(2)
+            with sleep_col:
+                usual_sleep = st.number_input(
+                    "About how many hours do you usually sleep a night?",
+                    min_value=0.0,
+                    max_value=float(MAX_SURVEY_SLEEP_HOURS),
+                    value=7.5,
+                    step=0.5,
+                )
+            with wake_col:
+                wake = st.time_input(
+                    "What time do you usually wake up?",
+                    value=datetime.strptime("07:30", "%H:%M").time(),
+                    step=900,
+                )
+
+            st.markdown(
+                '<div class="section-heading">How you like to study</div>',
+                unsafe_allow_html=True
+            )
+            st.caption("Pick \"No preference\" if you're not sure. I'll learn as you go.")
+            options = [None, *TASK_TYPES]
+            preferences = {}
+            for bucket, question in PREFERENCE_QUESTIONS.items():
+                preferences[bucket] = st.selectbox(
+                    question,
+                    options,
+                    format_func=lambda t: "No preference" if t is None else t.label,
+                    key=f"pref_{bucket}",
+                )
+
+            start = st.form_submit_button(
+                "Start planning", type="primary", width="stretch"
+            )
+
+        if start:
+            try:
+                student_id = student_id_for(name)
+            except ValueError as e:
+                st.warning(str(e))
+                return
+            if store.exists(student_id):
+                st.warning(
+                    f"Someone called {name.strip()} is already saved. "
+                    "Use \"I've been here before\", or pick another name."
+                )
+                return
+            session = DashboardSession.onboard(
+                student_id=student_id,
+                name=name.strip(),
+                typical_sleep_hours=usual_sleep,
+                typical_wake_time=wake,
+                task_preferences=preferences,
+            )
+            store.save(session)
+            st.session_state.backend = session
+            st.session_state.just_onboarded = True
+            st.rerun()
+
+    with back_tab:
+        # Type your name rather than pick from a list, so a public deployment
+        # never shows who else has a profile.
+        with st.form("returning_form"):
+            returning = st.text_input("Your name", placeholder="The name you signed up with")
+            go_on = st.form_submit_button("Continue", type="primary", width="stretch")
+        if go_on:
+            try:
+                student_id = student_id_for(returning)
+            except ValueError as e:
+                st.warning(str(e))
+                return
+            if not store.exists(student_id):
+                st.warning("I couldn't find that name. Check the spelling, or start as new.")
+                return
+            st.session_state.backend = store.load(student_id)
+            st.rerun()
+
+    st.caption(
+        "Prototype for CSCE 634. Please don't enter anything private: this is a demo, "
+        "and saved profiles may be reset when the site restarts."
+    )
+
+
+if "backend" not in st.session_state:
+    onboarding_screen()
+    st.stop()
+
+backend: DashboardSession = st.session_state.backend
+
+
+# ==========================================================
 # SIDEBAR NAVIGATION
 # ==========================================================
 
@@ -508,12 +637,13 @@ with st.sidebar:
 
     st.markdown("---")
 
-    if st.button("Reset demo", width="stretch"):
+    st.caption(f"Signed in as {backend.name}. Your progress is saved automatically.")
+
+    if st.button("Switch student", width="stretch"):
+        store.save(backend)
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
-
-    st.caption("Live planner · Sample schedule")
 
 
 # ==========================================================
@@ -536,10 +666,10 @@ if page == "Home":
     now = datetime.now()
 
     greeting = (
-        "Good morning!" if now.hour < 12
-        else "Good afternoon!" if now.hour < 17
-        else "Good evening!"
-    )
+        "Good morning" if now.hour < 12
+        else "Good afternoon" if now.hour < 17
+        else "Good evening"
+    ) + f", {backend.name}!"
 
     header_left, header_right = st.columns([3, 1])
 
@@ -566,6 +696,14 @@ if page == "Home":
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    if st.session_state.just_onboarded:
+        st.success(
+            "You're all set! Here's what I'll suggest to start with:\n\n"
+            + "\n".join(f"- {line}" for line in backend.starting_suggestions())
+            + "\n\nI added a sample study day so you can try things out."
+        )
+        st.session_state.just_onboarded = False
 
     st.markdown(
         '<div class="section-heading">Your energy today</div>',
@@ -1258,6 +1396,13 @@ elif page == "Replanning":
         )
         for item in backend.schedule_items():
             schedule_card(item)
+
+
+# ==========================================================
+# SAVE (after every interaction, so a restart picks up here)
+# ==========================================================
+
+store.save(backend)
 
 
 # ==========================================================

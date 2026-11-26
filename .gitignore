@@ -10,3 +10,6 @@ __pycache__/
 
 # Evaluation participant data (never commit)
 eval_logs/
+
+# Students saved by the dashboard (personal data, never commit)
+profiles/
