@@ -48,6 +48,14 @@ PYTHONPATH=src python -m integration.evaluation run --participant 1      # one p
 PYTHONPATH=src python -m integration.evaluation analyze                  # descriptive report of all logs
 ```
 
+Simulated participants (a response model answering instead of people, to demo
+logs -> analyze -> report; **not real data**, see `evaluation/simulated.py`):
+
+```bash
+PYTHONPATH=src python -m integration.evaluation simulate --n 8
+PYTHONPATH=src python -m integration.evaluation analyze --log-dir eval_logs/simulated --out eval_logs/simulated/report.md
+```
+
 How to run the team dry-run and the outside pilot (script, numbering, what to
 do if a session is interrupted): [`evaluation/PILOT_PROTOCOL.md`](evaluation/PILOT_PROTOCOL.md).
 

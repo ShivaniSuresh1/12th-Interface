@@ -17,6 +17,10 @@ From the repo root:
     PYTHONPATH=src python -m integration.evaluation analyze [--out FILE]
         Descriptive summary of every log so far (Markdown).
 
+    PYTHONPATH=src python -m integration.evaluation simulate [--n 8] [--seed 634]
+        SIMULATED participants (a response model, not people) written to
+        eval_logs/simulated/, to demo the pipeline. See simulated.py.
+
 Add --log-dir DIR to run/survey/analyze to keep a team dry-run out of the
 real pilot data, e.g. --log-dir eval_logs/dry_run.
 """
@@ -168,13 +172,27 @@ def main(argv: list[str] | None = None) -> None:
     survey.add_argument("--participant", type=int, required=True, help="1, 2, 3, ...")
     analyze = sub.add_parser("analyze", help="summarize the logs so far (Markdown)")
     analyze.add_argument("--out", type=Path, help="write the report here instead of printing")
-    for p in (run, survey, analyze):
+    sim = sub.add_parser("simulate", help="generate SIMULATED participants (not real data)")
+    sim.add_argument("--n", type=int, default=8, help="number of simulated participants")
+    sim.add_argument("--seed", type=int, default=634)
+    for p in (run, survey, analyze, sim):
         p.add_argument(
             "--log-dir", type=Path, default=LOG_DIR, help=f"where logs live (default {LOG_DIR})"
         )
     args = parser.parse_args(argv)
 
-    if args.command == "preview":
+    if args.command == "simulate":
+        import contextlib
+        import io
+
+        from .simulated import SIM_DIR, simulate
+
+        log_dir = SIM_DIR if args.log_dir == LOG_DIR else args.log_dir
+        with contextlib.redirect_stdout(io.StringIO()):
+            simulate(args.n, args.seed, log_dir)
+        print(f"wrote {args.n} SIMULATED participants to {log_dir} (not real data)")
+        print(f"next: PYTHONPATH=src python -m integration.evaluation analyze --log-dir {log_dir}")
+    elif args.command == "preview":
         preview(PILOT_SCENARIOS)
     elif args.command == "survey":
         run_survey(args.participant, log_dir=args.log_dir)

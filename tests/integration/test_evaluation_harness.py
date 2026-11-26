@@ -398,3 +398,37 @@ def test_analyze_reads_old_edit_note_column(tmp_path):
             "decision_time_s": 3.0, "timestamp": "2026-11-25T20:00:00-06:00",
         })
     assert "later please" in report(tmp_path)
+
+
+# -- simulated participants --------------------------------------------------------
+
+
+def test_simulated_logs_are_marked_and_bannered(tmp_path):
+    from integration.evaluation.analyze import load_rows, report
+    from integration.evaluation.simulated import simulate
+
+    simulate(4, seed=1, log_dir=tmp_path)
+    assert (tmp_path / "SIMULATED.md").exists()
+    assert len(load_rows(tmp_path)) == 4 * len(SCENARIOS)
+    text = report(tmp_path)
+    assert text.startswith("# SIMULATED results (not real participants)")
+    assert "SIMULATED DATA" in text
+
+
+def test_simulation_is_reproducible(tmp_path):
+    from integration.evaluation.analyze import load_rows
+    from integration.evaluation.simulated import simulate
+
+    simulate(4, seed=7, log_dir=tmp_path / "a")
+    simulate(4, seed=7, log_dir=tmp_path / "b")
+    keep = ("scenario_id", "condition", "decision", "trust", "confidence", "decision_time_s")
+    a = [[r[k] for k in keep] for r in load_rows(tmp_path / "a")]
+    b = [[r[k] for k in keep] for r in load_rows(tmp_path / "b")]
+    assert a == b
+
+
+def test_real_logs_get_no_simulated_banner(tmp_path):
+    from integration.evaluation.analyze import report
+
+    _four_participants(tmp_path)
+    assert "SIMULATED" not in report(tmp_path)
