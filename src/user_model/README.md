@@ -51,7 +51,33 @@ corrected = apply_checkin_correction(baseline, checkin_response="tired")
 - [x] Calibrate the curve onto the full 0-1 scale so domain_model's
       0.33 / 0.66 buckets are all reachable
 - [ ] Tune constants against real study-scenario data (Nov 20 milestone)
-- [ ] Persist energy history per student (storage TBD — SQLite suggested, not finalized)
+- [x] Serialization: `StudentProfile` / `EnergyReport` / `StudentSchedule` have
+      `to_dict()` / `from_dict()` (plain JSON-safe dicts, ISO-8601 times,
+      `schema_version`). Works for a JSON file or a SQLite JSON column; the
+      storage backend itself is integration's call.
+- [x] CLI onboarding survey: `python -m user_model.onboarding` feeds real
+      answers into `apply_sleep_survey()`
+- [ ] Persist energy history per student (backend TBD with integration)
+
+## Onboarding and saving a profile
+
+```bash
+PYTHONPATH=src python -m user_model.onboarding --student-id s1 --out profiles/s1.json
+```
+
+Asks for typical sleep hours and wake time (re-asking on invalid answers),
+prints the current energy estimate, and saves the profile as JSON. It
+refuses to overwrite an existing file. To load it back:
+
+```python
+import json
+from user_model import StudentProfile
+
+profile = StudentProfile.from_dict(json.loads(open("profiles/s1.json").read()))
+```
+
+Event times written as ISO strings come back as `datetime`s. A stored profile
+with a different `schema_version` raises `ValueError` instead of being misread.
 
 ## Prompt for your AI assistant
 

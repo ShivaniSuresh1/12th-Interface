@@ -8,9 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 ENERGY_SOURCES = ("baseline", "checkin_corrected")
+
+# Version of the to_dict()/from_dict() format. Bump it if the dict shape changes,
+# so stored profiles written by an older version are rejected instead of misread.
+SCHEMA_VERSION = 1
 
 # Number of check-in-corrected reports before a student leaves cold start
 # (Q2). Until then, other modules should lean on default rules.
@@ -46,6 +50,27 @@ class StudentSchedule:
 
     student_id: str
     events: list[dict] = field(default_factory=list)  # each is an `Event`
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe copy: datetimes inside events become ISO-8601 strings."""
+        events = [
+            {k: v.isoformat() if isinstance(v, datetime) else v for k, v in e.items()}
+            if isinstance(e, dict)
+            else e
+            for e in self.events
+        ]
+        return {"student_id": self.student_id, "events": events}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> StudentSchedule:
+        """Inverse of `to_dict`. Event `start`/`end` strings become datetimes again
+        (unreadable ones are kept as-is; `_readable` skips them, as before)."""
+        events = []
+        for e in data.get("events", []):
+            if isinstance(e, dict):
+                e = {**e, **{k: _from_iso(e[k]) for k in ("start", "end") if k in e}}
+            events.append(e)
+        return cls(student_id=data["student_id"], events=events)
 
     def last_sleep_before(self, at: datetime) -> dict | None:
         """Most recent "sleep" event that ended at or before `at`.
@@ -95,6 +120,31 @@ class EnergyReport:
         if self.source not in ENERGY_SOURCES:
             raise ValueError(f"source must be one of {ENERGY_SOURCES}, got {self.source!r}")
 
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe copy (timestamp as an ISO-8601 string)."""
+        return {
+            "student_id": self.student_id,
+            "timestamp": self.timestamp.isoformat(),
+            "energy_level": self.energy_level,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EnergyReport:
+        """Inverse of `to_dict`. Raises ValueError on an unreadable timestamp or
+        an invalid level/source, the same checks as constructing one directly."""
+        raw = data["timestamp"]
+        try:
+            timestamp = raw if isinstance(raw, datetime) else datetime.fromisoformat(raw)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"unreadable timestamp: {raw!r}") from e
+        return cls(
+            student_id=data["student_id"],
+            timestamp=timestamp,
+            energy_level=float(data["energy_level"]),
+            source=data["source"],
+        )
+
 
 @dataclass
 class StudentProfile:
@@ -115,10 +165,51 @@ class StudentProfile:
         self.energy_history.append(report)
         self.cold_start = len(self.checkin_reports()) < COLD_START_MIN_CHECKINS
 
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe copy of the whole profile, for storage (e.g. `json.dumps`)."""
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "student_id": self.student_id,
+            "sleep_hours": self.sleep_hours,
+            "schedule": self.schedule.to_dict() if self.schedule is not None else None,
+            "cold_start": self.cold_start,
+            "energy_history": [r.to_dict() for r in self.energy_history],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> StudentProfile:
+        """Inverse of `to_dict`. Missing optional keys fall back to the defaults
+        of a new profile; a different `schema_version` raises ValueError."""
+        version = data.get("schema_version", SCHEMA_VERSION)
+        if version != SCHEMA_VERSION:
+            raise ValueError(
+                f"stored profile has schema_version {version}, expected {SCHEMA_VERSION}"
+            )
+        schedule = data.get("schedule")
+        sleep_hours = data.get("sleep_hours")
+        return cls(
+            student_id=data["student_id"],
+            sleep_hours=float(sleep_hours) if sleep_hours is not None else None,
+            schedule=StudentSchedule.from_dict(schedule) if schedule is not None else None,
+            cold_start=bool(data.get("cold_start", True)),
+            energy_history=[EnergyReport.from_dict(r) for r in data.get("energy_history", [])],
+        )
+
 
 def as_aware(dt: datetime) -> datetime:
     """Treat naive datetimes as local time so all comparisons are tz-aware."""
     return dt if dt.tzinfo is not None else dt.astimezone()
+
+
+def _from_iso(value: object) -> object:
+    """An ISO-8601 string as a datetime, exactly as written (a naive time stays
+    naive); anything else, including an unreadable string, is returned unchanged."""
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    return value
 
 
 def parse_time(value: object) -> datetime | None:
