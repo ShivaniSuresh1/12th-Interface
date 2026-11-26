@@ -51,7 +51,7 @@ DEFAULT_DELAY = timedelta(minutes=15)
 DAY_END = time(22, 0)  # don't propose study slots past this
 
 ASK_PROMPT = "Want to just tell me what changed?"
-RESPONSE_HINT = "Sound good? (accept / edit / skip)"
+RESPONSE_HINT = "Sound good? (accept / edit / reject)"
 
 _TRIGGERS = {
     "fatigue": "fatigue",
@@ -248,8 +248,8 @@ def _propose_fatigue(student_id, trigger, events, energy, now) -> ReplanProposal
         change = _session_change(target, "shorten", start, new_end, confidence, energy)
         message = (
             f"Since you're feeling tired, I'd cut \"{target.label}\" down to a 25-minute "
-            f"session ending at {_fmt(new_end)}, because a short focused block beats "
-            f"pushing through exhausted. {RESPONSE_HINT}"
+            f"session ending at {_fmt(new_end)}, because a short, focused block works "
+            f"better than pushing through when you're exhausted. {RESPONSE_HINT}"
         )
     else:
         new_start = start + FATIGUE_BREAK
@@ -322,7 +322,10 @@ def _propose_missed(student_id, trigger, events, energy, now) -> ReplanProposal:
     if target is None:
         return _ask(student_id, trigger, "I couldn't tell which session got missed.", energy, 0.2)
 
-    length = target.end - target.start
+    full_length = target.end - target.start
+    # Low energy: don't stack a full make-up session on a tired student.
+    tired = energy is not None and energy < LOW_ENERGY and full_length > SHORT_SESSION
+    length = SHORT_SESSION if tired else full_length
     local_now = align(now, target.start)
     later = _free_slot(events, local_now, length, skip=target)
     if later is None:
@@ -331,10 +334,17 @@ def _propose_missed(student_id, trigger, events, energy, now) -> ReplanProposal:
     else:
         when = f"{_fmt(later)} today"
     change = _session_change(target, "defer", later, later + length, 0.75, energy)
-    message = (
-        f'No worries about missing "{target.label}" -- I\'d make it up at {when}, '
-        f"because that's the next open slot that fits it. {RESPONSE_HINT}"
-    )
+    if tired:
+        message = (
+            f'No worries about missing "{target.label}". Your energy is low, so I\'d make '
+            f"up a shorter 25-minute version at {when} instead of the full session. "
+            f"{RESPONSE_HINT}"
+        )
+    else:
+        message = (
+            f'No worries about missing "{target.label}" -- I\'d make it up at {when}, '
+            f"because that's the next open slot that fits it. {RESPONSE_HINT}"
+        )
     return ReplanProposal(student_id, trigger, message, change)
 
 

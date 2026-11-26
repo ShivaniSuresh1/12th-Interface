@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 
 from negotiation import propose_replan, resolve_proposal, training_example
-from negotiation.replanning import ASK_PROMPT, ReplanProposal
+from negotiation.replanning import ASK_PROMPT, RESPONSE_HINT, SHORT_SESSION, ReplanProposal
 
 from .conftest import at, make_profile
 
@@ -107,6 +107,29 @@ def test_missed_session_goes_to_tomorrow_when_day_is_full(events, freeze_now):
     start, _ = _times(proposal)
     assert start.date() > at(0).date()
     assert "tomorrow" in proposal.message
+
+
+def test_missed_session_is_shortened_when_energy_is_low(schedule, freeze_now):
+    freeze_now(at(15, 5))
+    proposal = propose_replan(make_profile(schedule, energy=0.21), "missed_session")
+    assert proposal.proposed_change["action"] == "defer"
+    start, end = _times(proposal)
+    assert end - start == SHORT_SESSION
+    assert "25-minute" in proposal.message
+
+
+def test_missed_session_keeps_full_length_at_medium_energy(schedule, freeze_now):
+    freeze_now(at(15, 5))
+    proposal = propose_replan(make_profile(schedule, energy=0.5), "missed_session")
+    assert _times(proposal) == (at(16), at(17))
+
+
+def test_response_hint_matches_resolve_words():
+    for word in ("accept", "edit", "reject"):
+        assert word in RESPONSE_HINT
+        assert resolve_proposal(ReplanProposal("s", "t", "m", {}), word).outcome.startswith(
+            word[:4]
+        )
 
 
 # --- fallback ----------------------------------------------------------
