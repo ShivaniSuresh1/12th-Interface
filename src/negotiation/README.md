@@ -77,6 +77,27 @@ and `missed_session` (plus aliases) get specific proposals, anything else
 gets the "tell me what changed" fallback. `proposed_change`'s shape is
 documented at the top of `replanning.py`.
 
+**"Tell me what changed" fallback (Phase 3).** When `propose_replan`
+returns `action: "ask"`, `run_ask_flow` shows the question, reads the
+student's free-text answer, turns it into a concrete `edited_change` and
+resolves it, then tells the student what will happen:
+
+```python
+from negotiation import run_ask_flow, resolve_answer, confirmation_message
+
+if proposal.proposed_change["action"] == "ask":
+    resolution = run_ask_flow(proposal)          # terminal: input()/print()
+    # or, from a UI: resolve_answer(proposal, text) + confirmation_message(resolution)
+```
+
+"I'm wiped, 20 minutes max" becomes `{"action": "shorten", "minutes": 20}`,
+"meeting ran 15 min late" becomes a 15-minute `move`, and a named task
+("switch to flashcards") sets `task_type`, so `training_example` picks it
+up for learning. An empty answer or "never mind" is `rejected`. Something
+we can't read is kept as a `note` and changes nothing. The full
+`edited_change` shape is at the top of `fallback.py`. `propose_replan` and
+its confidence threshold are unchanged.
+
 ## TODO
 
 - [x] Define what counts as a "session boundary" precisely (see `checkin.py`)
@@ -88,7 +109,8 @@ documented at the top of `replanning.py`.
       (Calendar.help-style graceful fallback when the system isn't confident)
 - [x] Agree on the schedule event shape with User Model (Shivani)
 - [ ] Make `MAX_CHECKINS_PER_DAY` configurable per student
-- [ ] Parse the free-text answer to the "tell me what changed" fallback
+- [x] Parse the free-text answer to the "tell me what changed" fallback
+      (`fallback.py`, Phase 3)
 - [ ] Tune thresholds/durations after the Nov 20 scenario testing
 
 ## Prompt for your AI assistant
