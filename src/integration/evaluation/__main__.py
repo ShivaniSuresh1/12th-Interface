@@ -17,6 +17,10 @@ From the repo root:
     PYTHONPATH=src python -m integration.evaluation analyze [--out FILE]
         Descriptive summary of every log so far (Markdown).
 
+    PYTHONPATH=src python -m integration.evaluation simulate [--n 8] [--seed 634]
+        SIMULATED participants (a response model, not people) written to
+        eval_logs/simulated/, to demo the pipeline. See simulated.py.
+
 Add --log-dir DIR to run/survey/analyze to keep a team dry-run out of the
 real pilot data, e.g. --log-dir eval_logs/dry_run.
 """
@@ -37,9 +41,13 @@ from .simulate import run_scenario
 from .survey import run_survey
 
 DECISIONS = {"a": "accept", "e": "edit", "r": "reject"}
+# For an "ask" proposal there is no change to accept/edit/reject: the planner
+# asks a question. y/n is logged as accept/reject so analysis stays the same
+# ("accept" = happy to be asked, "reject" = would rather it just decided).
+ASK_DECISIONS = {"y": "accept", "n": "reject"}
 RULE = "-" * 70
 
-TRUST_QUESTION = "How much do you trust the planner's suggestion here?"
+TRUST_QUESTION = "How much do you trust the planner's suggestion here, even if you didn't go with it?"
 CONFIDENCE_QUESTION = "How confident are you in the decision you just made?"
 SCALE_HINT = "1 = not at all, 7 = completely"
 
@@ -53,6 +61,23 @@ def ask_decision(target: str, input_fn: InputFn = input) -> str:
         if answer in DECISIONS:
             return DECISIONS[answer]
         print("Please type a, e, or r.")
+
+
+def ask_answer_question(input_fn: InputFn = input) -> str:
+    prompt = "The planner is asking you what changed. Would you answer its question? [y/n]: "
+    while True:
+        answer = input_fn(prompt).strip().lower()[:1]
+        if answer in ASK_DECISIONS:
+            return ASK_DECISIONS[answer]
+        print("Please type y or n.")
+
+
+NOTE_PROMPTS = {
+    # (is_ask, decision) -> follow-up question; Enter skips the optional ones
+    (False, "edit"): "What would you change? ",
+    (False, "reject"): "What would you prefer instead? (optional, press Enter to skip) ",
+    (True, "accept"): "What would you tell the planner? (optional, press Enter to skip) ",
+}
 
 
 def ask_rating(question: str, input_fn: InputFn = input) -> int:
@@ -96,17 +121,22 @@ def run_session(
             print(render(scenario, output, condition))
             print()
 
+            change = output.proposed_change or {}
+            is_ask = change.get("action") == "ask"
+
             shown_at = clock()
-            decision = ask_decision(decision_target(output), input_fn)
+            if is_ask:
+                decision = ask_answer_question(input_fn)
+            else:
+                decision = ask_decision(decision_target(output), input_fn)
             decision_time = clock() - shown_at
 
-            edit_note = ""
-            if decision == "edit":
-                edit_note = input_fn("What would you change? ").strip()
+            note = ""
+            if (is_ask, decision) in NOTE_PROMPTS:
+                note = input_fn(NOTE_PROMPTS[(is_ask, decision)]).strip()
             trust = ask_rating(TRUST_QUESTION, input_fn)
             confidence = ask_rating(CONFIDENCE_QUESTION, input_fn)
 
-            change = output.proposed_change or {}
             row = {
                 "participant": participant,
                 "position": i,
@@ -117,7 +147,7 @@ def run_session(
                 "energy_level": output.energy_level,
                 "recommended_task_type": output.recommended_task_type,
                 "decision": decision,
-                "edit_note": edit_note,
+                "note": note,
                 "trust": trust,
                 "confidence": confidence,
                 "decision_time_s": round(decision_time, 2),
@@ -142,13 +172,27 @@ def main(argv: list[str] | None = None) -> None:
     survey.add_argument("--participant", type=int, required=True, help="1, 2, 3, ...")
     analyze = sub.add_parser("analyze", help="summarize the logs so far (Markdown)")
     analyze.add_argument("--out", type=Path, help="write the report here instead of printing")
-    for p in (run, survey, analyze):
+    sim = sub.add_parser("simulate", help="generate SIMULATED participants (not real data)")
+    sim.add_argument("--n", type=int, default=8, help="number of simulated participants")
+    sim.add_argument("--seed", type=int, default=634)
+    for p in (run, survey, analyze, sim):
         p.add_argument(
             "--log-dir", type=Path, default=LOG_DIR, help=f"where logs live (default {LOG_DIR})"
         )
     args = parser.parse_args(argv)
 
-    if args.command == "preview":
+    if args.command == "simulate":
+        import contextlib
+        import io
+
+        from .simulated import SIM_DIR, simulate
+
+        log_dir = SIM_DIR if args.log_dir == LOG_DIR else args.log_dir
+        with contextlib.redirect_stdout(io.StringIO()):
+            simulate(args.n, args.seed, log_dir)
+        print(f"wrote {args.n} SIMULATED participants to {log_dir} (not real data)")
+        print(f"next: PYTHONPATH=src python -m integration.evaluation analyze --log-dir {log_dir}")
+    elif args.command == "preview":
         preview(PILOT_SCENARIOS)
     elif args.command == "survey":
         run_survey(args.participant, log_dir=args.log_dir)

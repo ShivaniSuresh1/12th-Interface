@@ -64,6 +64,10 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+On Windows (PowerShell), activate with `.venv\Scripts\activate`, and instead
+of the `PYTHONPATH=src python ...` prefix used in the module READMEs, run
+`$env:PYTHONPATH="src"` once per terminal and then `python ...`.
+
 Python 3.11+ assumed. No external services required yet — everything runs
 locally against the stub in-memory data in each module.
 

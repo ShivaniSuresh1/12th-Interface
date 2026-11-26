@@ -22,8 +22,8 @@ FIELDS = [
     "proposal_action",  # move | shorten | defer | ask | "" (no disruption)
     "energy_level",
     "recommended_task_type",
-    "decision",  # accept | edit | reject
-    "edit_note",  # free text, only when decision == edit
+    "decision",  # accept | edit | reject (for "ask": accept = would answer, reject = wouldn't)
+    "note",  # free text: what they'd change (edit), prefer (reject), or tell the planner (ask)
     "trust",  # 1-7: how much they trust the planner's suggestion
     "confidence",  # 1-7: how confident they are in their own decision
     "decision_time_s",  # seconds from scenario shown to a/e/r answered
