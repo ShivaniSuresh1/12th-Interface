@@ -194,10 +194,15 @@ def report(log_dir: Path = LOG_DIR) -> str:
         "",
     ]
 
-    edits = [r for r in rows if r["edit_note"].strip()]
-    if edits:
-        out += ["## Edit notes", ""]
-        out += [f"- P{r['participant']} {r['scenario_id']} ({r['condition']}): {r['edit_note']}" for r in edits]
+    # "edit_note" is the column name in logs from before the dry-run fixes.
+    notes = [(r, (r.get("note") or r.get("edit_note") or "").strip()) for r in rows]
+    notes = [(r, n) for r, n in notes if n]
+    if notes:
+        out += ["## Participant notes", ""]
+        out += [
+            f"- P{r['participant']} {r['scenario_id']} ({r['condition']}, {r['decision']}): {n}"
+            for r, n in notes
+        ]
         out.append("")
 
     out += _survey_section(survey)
