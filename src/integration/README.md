@@ -51,6 +51,22 @@ PYTHONPATH=src python -m integration.evaluation analyze                  # descr
 How to run the team dry-run and the outside pilot (script, numbering, what to
 do if a session is interrupted): [`evaluation/PILOT_PROTOCOL.md`](evaluation/PILOT_PROTOCOL.md).
 
+## Dashboard (`frontend/app.py`, Phase 3 step 8)
+
+```bash
+pip install -r frontend/requirements.txt
+streamlit run frontend/app.py
+```
+
+The Streamlit dashboard talks only to `integration.dashboard.DashboardSession`,
+a thin, Streamlit-free API over `StudySessionPlanner`: sleep input, one-tap
+check-in, energy gauge + "why", today's schedule (add / complete), Study Mode
+(starting a task teaches the domain model), replanning with accept / keep, and
+the interactive "tell me what changed" flow (`negotiation.resolve_answer`).
+Accepted changes update the schedule. Tests: `tests/integration/test_dashboard.py`
+(always) and `test_dashboard_app.py` (clicks through the UI; skipped unless
+streamlit is installed). Persistence between runs is step 9.
+
 ## TODO
 
 - [ ] Flesh out `StudySessionPlanner` once the other three modules'

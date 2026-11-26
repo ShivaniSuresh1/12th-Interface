@@ -1,8 +1,29 @@
 
+"""The 12th Interface: student dashboard (Streamlit), wired to the live planner.
+
+Run from the repo root:
+
+    pip install -r frontend/requirements.txt
+    streamlit run frontend/app.py
+
+Every number, recommendation, "why" and replan on this page comes from
+StudySessionPlanner through integration.dashboard.DashboardSession. The
+only illustrative data left is the weekly charts on the Insights page,
+and they are labelled as sample data.
+"""
+
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import plotly.graph_objects as go
 import streamlit as st
+
+# Let `streamlit run frontend/app.py` find the src/ packages without PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from domain_model import TaskType
+from integration.dashboard import DISRUPTIONS, FEELINGS, DashboardSession
 
 # ==========================================================
 # PAGE CONFIGURATION
@@ -344,58 +365,23 @@ hr {
 
 
 # ==========================================================
-# SESSION STATE
+# SESSION STATE (the live backend lives here between reruns)
 # ==========================================================
 
-defaults = {
-    "energy": 68,
-    "sleep": 7.5,
-    "feeling": "",
-    "study_started": False,
-    "completed_sessions": 0,
-    "active_task": "Review lecture notes",
-    "disruption_message": "",
-    "schedule": [
-        {"time": "10:00 AM", "task": "Reading assignment",
-         "duration": "45 min", "status": "Upcoming"},
-        {"time": "11:00 AM", "task": "Problem set",
-         "duration": "60 min", "status": "Upcoming"},
-        {"time": "1:00 PM", "task": "Review lecture notes",
-         "duration": "45 min", "status": "Upcoming"},
-        {"time": "3:00 PM", "task": "Take a short break",
-         "duration": "15 min", "status": "Upcoming"},
-    ],
-}
+if "backend" not in st.session_state:
+    st.session_state.backend = DashboardSession(student_id="demo", sleep_hours=7.5)
 
-for key, value in defaults.items():
+for key, value in {"proposal": None, "replan_result": "", "page_notice": ""}.items():
     if key not in st.session_state:
-        st.session_state[key] = value.copy() if isinstance(value, list) else value
+        st.session_state[key] = value
+
+backend: DashboardSession = st.session_state.backend
+TASK_TYPES = list(TaskType)
 
 
 # ==========================================================
 # HELPER FUNCTIONS
 # ==========================================================
-
-def get_energy_details(value):
-    if value < 40:
-        return (
-            "Low energy",
-            "Reading assignment",
-            "A lighter reading task may be more suitable right now."
-        )
-    elif value < 70:
-        return (
-            "Moderate energy",
-            "Review lecture notes",
-            "Reviewing material is a good match for your current energy."
-        )
-    else:
-        return (
-            "High energy",
-            "Problem set",
-            "You may be ready to work on a more challenging task."
-        )
-
 
 def make_chart_layout(fig, height=300):
     fig.update_layout(
@@ -444,20 +430,22 @@ def metric_card(label, value, caption):
     </div>
     """, unsafe_allow_html=True)
 
-
 def schedule_card(item):
     status = item["status"]
     status_text = "✓ Completed" if status == "Completed" else status
-
     st.markdown(f"""
     <div class="schedule-card">
         <div class="schedule-time">{item["time"]}</div>
         <div class="schedule-name">{item["task"]}</div>
         <div class="schedule-detail">
-            {item["duration"]} · {status_text}
+            {item["task_type"]} · {item["duration"]} · {status_text}
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def completed_count():
+    return sum(1 for x in backend.schedule_items() if x["status"] == "Completed")
 
 
 # ==========================================================
@@ -465,6 +453,7 @@ def schedule_card(item):
 # ==========================================================
 
 with st.sidebar:
+
     st.markdown(
         '<div class="sidebar-brand">✦ The 12th Interface</div>'
         '<div class="sidebar-subtitle">'
@@ -492,30 +481,50 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown(
+        '<div class="nav-label">LAST NIGHT</div>',
+        unsafe_allow_html=True
+    )
+
+    sleep = st.number_input(
+        "Hours of sleep",
+        min_value=0.0,
+        max_value=14.0,
+        value=float(backend.sleep_hours),
+        step=0.5,
+        help="Your energy estimate starts from this.",
+    )
+    if sleep != backend.sleep_hours:
+        backend.set_sleep(sleep)
+
+    plan = backend.plan()
+
+    st.markdown(
         '<div class="nav-label">YOUR DAILY SUMMARY</div>',
         unsafe_allow_html=True
     )
 
-    st.metric(
-        "Current energy",
-        f'{st.session_state.energy}%'
-    )
-
-    st.metric(
-        "Sessions completed",
-        st.session_state.completed_sessions
-    )
+    st.metric("Current energy", f'{plan["energy_pct"]}%')
+    st.metric("Sessions completed", completed_count())
 
     st.markdown("---")
-    st.caption("Early prototype · Sample data")
+
+    if st.button("Reset demo", width="stretch"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
+    st.caption("Live planner · Sample schedule")
 
 
 # ==========================================================
-# SHARED ENERGY INFORMATION
+# SHARED ENERGY INFORMATION (all from the planner)
 # ==========================================================
 
-energy = st.session_state.energy
-energy_label, recommended_task, explanation = get_energy_details(energy)
+energy = plan["energy_pct"]
+energy_label = plan["energy_label"]
+recommended_task = plan["task_label"]
+explanation = plan["why"]
+schedule = backend.schedule_items()
 
 
 # ==========================================================
@@ -525,6 +534,7 @@ energy_label, recommended_task, explanation = get_energy_details(energy)
 if page == "Home":
 
     now = datetime.now()
+
     greeting = (
         "Good morning!" if now.hour < 12
         else "Good afternoon!" if now.hour < 17
@@ -568,22 +578,22 @@ if page == "Home":
         metric_card("ESTIMATED ENERGY", f"{energy}%", energy_label)
 
     with c2:
-        metric_card("SLEEP LAST NIGHT", f'{st.session_state.sleep}h',
-                    "Based on your input")
+        metric_card("SLEEP LAST NIGHT", f"{backend.sleep_hours:g}h",
+                    "From the sidebar")
 
     with c3:
         metric_card(
             "SESSIONS COMPLETED",
-            str(st.session_state.completed_sessions),
+            str(completed_count()),
             "Study sessions completed today"
         )
 
     st.write("")
 
-    # Energy progress visualization
     energy_col, checkin_col = st.columns([1.2, 1], gap="large")
 
     with energy_col:
+
         st.markdown(
             '<div class="section-heading">Your energy level</div>',
             unsafe_allow_html=True
@@ -604,10 +614,11 @@ if page == "Home":
                 "bar": {"color": "#A78BFA"},
                 "bgcolor": "#25243A",
                 "borderwidth": 0,
+                # same low / moderate / high cut points as the planner (0.33 / 0.66)
                 "steps": [
-                    {"range": [0, 40], "color": "#382332"},
-                    {"range": [40, 70], "color": "#342D4A"},
-                    {"range": [70, 100], "color": "#293D3A"},
+                    {"range": [0, 33], "color": "#382332"},
+                    {"range": [33, 66], "color": "#342D4A"},
+                    {"range": [66, 100], "color": "#293D3A"},
                 ],
             }
         ))
@@ -619,9 +630,11 @@ if page == "Home":
             margin={"l": 30, "r": 30, "t": 25, "b": 10}
         )
 
-        st.plotly_chart(gauge, use_container_width=True)
+        st.plotly_chart(gauge, width="stretch")
+        st.caption(plan["energy_source"])
 
     with checkin_col:
+
         st.markdown(
             '<div class="section-heading">How are you feeling?</div>',
             unsafe_allow_html=True
@@ -631,7 +644,7 @@ if page == "Home":
 
         feeling = st.radio(
             "Select how you feel",
-            ["Tired", "Fine", "Energized"],
+            list(FEELINGS),
             horizontal=True,
             label_visibility="collapsed",
             key="home_feeling"
@@ -640,29 +653,20 @@ if page == "Home":
         if st.button(
             "Update my energy",
             type="primary",
-            use_container_width=True
+            width="stretch"
         ):
-            values = {
-                "Tired": 30,
-                "Fine": 60,
-                "Energized": 90,
-            }
-
-            st.session_state.energy = values[feeling]
-            st.session_state.feeling = feeling
+            backend.checkin(feeling)
             st.rerun()
 
-        if st.session_state.feeling:
-            st.success(
-                f"Your latest check-in: {st.session_state.feeling}"
-            )
+        if backend.last_feeling:
+            st.success(f"Your latest check-in: {backend.last_feeling}")
 
     st.markdown("---")
 
-    # Recommendation and schedule
     left, right = st.columns([1, 1.2], gap="large")
 
     with left:
+
         st.markdown(
             '<div class="section-heading">Your next study task</div>',
             unsafe_allow_html=True
@@ -677,63 +681,45 @@ if page == "Home":
                 {recommended_task}
             </div>
             <div class="recommendation-description">
-                {explanation}
+                {energy_label} ({energy}%)
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        with st.expander("Why this recommendation?"):
-            st.write(explanation)
-            st.caption(
-                "This prototype uses a simple energy-to-task rule."
-            )
+        with st.expander("Why this recommendation?", expanded=True):
+            st.write(f"I suggest {recommended_task.lower()} {explanation}.")
+            st.caption(plan["energy_source"])
+            if plan["cold_start"]:
+                st.caption(
+                    "I'm still learning your patterns, so I'm leaning on default rules for now."
+                )
 
         if st.button(
             "Start this task",
             type="primary",
-            use_container_width=True
+            width="stretch"
         ):
-            st.session_state.active_task = recommended_task
-            st.session_state.study_started = True
-            st.success("Your study session is ready!")
+            backend.start_task(plan["task_type"])
+            st.session_state.page_notice = (
+                f"{recommended_task} session started. Open Study Mode to see it."
+            )
             st.rerun()
 
+        if st.session_state.page_notice:
+            st.success(st.session_state.page_notice)
+
     with right:
+
         st.markdown(
             '<div class="section-heading">Today\'s schedule</div>',
             unsafe_allow_html=True
         )
 
-        for item in st.session_state.schedule[:4]:
+        upcoming = [x for x in schedule if x["status"] in ("In progress", "Upcoming")]
+        for item in (upcoming or schedule)[:4]:
             schedule_card(item)
 
-        if st.button("View full schedule"):
-            st.session_state.page_target = "My Schedule"
-            st.info("Choose My Schedule in the sidebar to view all sessions.")
-
-    st.markdown("---")
-
-    # Weekly preview chart
-    st.markdown(
-        '<div class="section-heading">Your weekly study activity</div>',
-        unsafe_allow_html=True
-    )
-
-    weekly = go.Figure()
-
-    weekly.add_trace(go.Bar(
-        x=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-        y=[2.5, 3, 1.5, 4, 2, 3.5, 1],
-        marker_color="#8B6AD0",
-        marker_line_width=0,
-        name="Study hours"
-    ))
-
-    weekly.update_yaxes(title="Hours", range=[0, 5])
-    st.plotly_chart(
-        make_chart_layout(weekly, 260),
-        use_container_width=True
-    )
+        st.caption("Choose My Schedule in the sidebar to see the full day.")
 
 
 # ==========================================================
@@ -747,31 +733,26 @@ elif page == "My Schedule":
         "Organize your study sessions and make time for breaks."
     )
 
-    today = datetime.now()
-
     a, b, c = st.columns(3)
 
     with a:
         metric_card(
             "TOTAL SESSIONS",
-            len(st.session_state.schedule),
+            len(schedule),
             "Planned for today"
         )
 
     with b:
         metric_card(
             "COMPLETED",
-            sum(
-                1 for x in st.session_state.schedule
-                if x["status"] == "Completed"
-            ),
+            completed_count(),
             "Sessions finished"
         )
 
     with c:
         metric_card(
             "SLEEP",
-            f'{st.session_state.sleep}h',
+            f"{backend.sleep_hours:g}h",
             "Last night's sleep"
         )
 
@@ -780,62 +761,76 @@ elif page == "My Schedule":
     left, right = st.columns([1.4, 1], gap="large")
 
     with left:
+
         st.markdown(
             '<div class="section-heading">Today\'s study timeline</div>',
             unsafe_allow_html=True
         )
 
-        for index, item in enumerate(st.session_state.schedule):
+        for item in schedule:
+
             schedule_card(item)
 
-            if item["status"] != "Completed" and st.button(
+            if item["status"] not in ("Completed", "Done") and st.button(
                 "Mark completed",
-                key=f"complete_{index}"
+                key=f"complete_{item['session_id']}"
             ):
-                st.session_state.schedule[index]["status"] = "Completed"
-                st.session_state.completed_sessions += 1
+                backend.mark_completed(item["session_id"])
                 st.rerun()
 
+        if backend.deferred:
+            st.caption(
+                "Moved to tomorrow: "
+                + ", ".join(e["title"] for e in backend.deferred)
+            )
+
     with right:
+
         st.markdown(
             '<div class="section-heading">Add a study session</div>',
             unsafe_allow_html=True
         )
 
         with st.form("add_session_form"):
+
             new_task = st.text_input(
                 "Task name",
                 placeholder="e.g. Database assignment"
             )
 
+            new_type = st.selectbox(
+                "Kind of task",
+                TASK_TYPES,
+                format_func=lambda t: t.label,
+            )
+
+            today = datetime.now().astimezone()
+            slots = [
+                today.replace(hour=h, minute=m, second=0, microsecond=0)
+                for h in range(8, 22)
+                for m in (0, 30)
+            ]
             new_time = st.selectbox(
                 "Start time",
-                [
-                    "9:00 AM", "10:00 AM", "11:00 AM",
-                    "12:00 PM", "1:00 PM", "2:00 PM",
-                    "3:00 PM", "4:00 PM", "5:00 PM"
-                ]
+                slots,
+                format_func=lambda t: t.strftime("%I:%M %p").lstrip("0"),
             )
 
             duration = st.selectbox(
-                "Duration",
-                ["15 min", "30 min", "45 min", "60 min", "90 min"]
+                "Duration (minutes)",
+                [15, 25, 30, 45, 60, 90],
+                index=3,
             )
 
             submitted = st.form_submit_button(
                 "Add to schedule",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
 
             if submitted:
                 if new_task.strip():
-                    st.session_state.schedule.append({
-                        "time": new_time,
-                        "task": new_task.strip(),
-                        "duration": duration,
-                        "status": "Upcoming"
-                    })
+                    backend.add_session(new_task.strip(), new_time, duration, new_type)
                     st.success("Session added!")
                     st.rerun()
                 else:
@@ -849,8 +844,8 @@ elif page == "My Schedule":
         )
 
         st.info(
-            "Try alternating challenging study sessions "
-            "with short breaks to avoid getting overwhelmed."
+            f"Right now your energy is {energy_label.lower()}, "
+            f"so {recommended_task.lower()} is a good fit: {explanation}."
         )
 
 
@@ -865,20 +860,27 @@ elif page == "Insights":
         "Understand your patterns and discover when you study best."
     )
 
+    curve = backend.energy_curve()
+    checkins = backend.checkin_history()
+
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        metric_card("AVERAGE ENERGY", "68%", "Illustrative weekly average")
+        metric_card(
+            "AVERAGE ENERGY TODAY",
+            f"{round(sum(p for _t, p in curve) / len(curve))}%",
+            "Planner estimate, 8 AM-10 PM",
+        )
 
     with c2:
-        metric_card("STUDY HOURS", "17.5h", "Illustrative weekly total")
+        peak_time, peak = max(curve, key=lambda x: x[1])
+        metric_card("PEAK ENERGY", f"{peak}%", f"Estimated around {peak_time}")
 
     with c3:
-        metric_card("STUDY STREAK", "4 days", "Illustrative current streak")
+        metric_card("CHECK-INS", str(len(checkins)), "Used to personalize your estimate")
 
     st.write("")
 
-    # Energy trend
     st.markdown(
         '<div class="section-heading">Energy throughout the day</div>',
         unsafe_allow_html=True
@@ -887,18 +889,24 @@ elif page == "Insights":
     energy_chart = go.Figure()
 
     energy_chart.add_trace(go.Scatter(
-        x=[
-            "8 AM", "10 AM", "12 PM",
-            "2 PM", "4 PM", "6 PM", "8 PM"
-        ],
-        y=[55, 78, 65, 45, 70, 62, 48],
+        x=[t for t, _p in curve],
+        y=[p for _t, p in curve],
         mode="lines+markers",
-        name="Energy",
+        name="Estimated energy",
         line={"color": "#A78BFA", "width": 3, "shape": "spline"},
-        marker={"size": 8, "color": "#C4A7FF"},
+        marker={"size": 7, "color": "#C4A7FF"},
         fill="tozeroy",
         fillcolor="rgba(167,139,250,0.10)"
     ))
+
+    if checkins:
+        energy_chart.add_trace(go.Scatter(
+            x=[t for t, _p in checkins],
+            y=[p for _t, p in checkins],
+            mode="markers",
+            name="Your check-ins",
+            marker={"size": 12, "color": "#F4F0FF", "symbol": "diamond"},
+        ))
 
     energy_chart.update_yaxes(
         title="Energy level",
@@ -908,8 +916,15 @@ elif page == "Insights":
 
     st.plotly_chart(
         make_chart_layout(energy_chart, 330),
-        use_container_width=True
+        width="stretch"
     )
+
+    st.caption(
+        "From the planner's energy model: your sleep from the sidebar, the time of day, "
+        "and your check-ins. Change your sleep to see the curve move."
+    )
+
+    st.markdown("---")
 
     left, right = st.columns(2, gap="large")
 
@@ -930,7 +945,7 @@ elif page == "Insights":
 
         st.plotly_chart(
             make_chart_layout(study_chart, 290),
-            use_container_width=True
+            width="stretch"
         )
 
     with right:
@@ -961,7 +976,7 @@ elif page == "Insights":
 
         st.plotly_chart(
             completion_chart,
-            use_container_width=True
+            width="stretch"
         )
 
     st.markdown("---")
@@ -1010,11 +1025,11 @@ elif page == "Insights":
 
     st.plotly_chart(
         sleep_chart,
-        use_container_width=True
+        width="stretch"
     )
 
     st.caption(
-        "All analytics on this page use illustrative sample data. "
+        "The weekly charts above use illustrative sample data. "
         "They are not actual student measurements."
     )
 
@@ -1030,7 +1045,8 @@ elif page == "Study Mode":
         "Focus on one task at a time. Your study session starts here."
     )
 
-    if st.session_state.study_started:
+    if backend.active_task:
+
         st.markdown("""
         <div class="welcome">
             <div class="welcome-label">FOCUS SESSION ACTIVE</div>
@@ -1049,7 +1065,7 @@ elif page == "Study Mode":
 
         metric_card(
             "CURRENT TASK",
-            st.session_state.active_task,
+            TaskType(backend.active_task).label,
             "Your active study session"
         )
 
@@ -1058,14 +1074,15 @@ elif page == "Study Mode":
         if st.button(
             "Finish study session",
             type="primary",
-            use_container_width=True
+            width="stretch"
         ):
-            st.session_state.study_started = False
-            st.session_state.completed_sessions += 1
+            backend.finish_task()
+            st.session_state.page_notice = ""
             st.success("Great work! Your session is complete.")
             st.rerun()
 
     else:
+
         st.markdown("""
         <div class="welcome">
             <div class="welcome-label">YOUR FOCUS SPACE</div>
@@ -1076,17 +1093,12 @@ elif page == "Study Mode":
         </div>
         """, unsafe_allow_html=True)
 
-        task_options = [
-            "Reading assignment",
-            "Problem set",
-            "Review lecture notes",
-            "Memorization",
-            "Other"
-        ]
-
         selected_task = st.selectbox(
             "What would you like to work on?",
-            task_options
+            TASK_TYPES,
+            index=TASK_TYPES.index(TaskType(plan["task_type"])),
+            format_func=lambda t: t.label
+            + ("  (recommended)" if t.value == plan["task_type"] else ""),
         )
 
         duration = st.select_slider(
@@ -1108,11 +1120,12 @@ elif page == "Study Mode":
         if st.button(
             "Start my session",
             type="primary",
-            use_container_width=True
+            width="stretch"
         ):
-            st.session_state.active_task = selected_task
-            st.session_state.study_started = True
+            backend.start_task(selected_task.value)
             st.rerun()
+
+        st.caption("What you choose here teaches the planner what you like at this energy level.")
 
 
 # ==========================================================
@@ -1142,51 +1155,37 @@ elif page == "Replanning":
         unsafe_allow_html=True
     )
 
-    trigger = st.selectbox(
-        "Choose a disruption",
-        [
-            "Meeting ran late",
-            "I am feeling tired",
-            "I missed a study session"
-        ]
-    )
-
-    if trigger == "Meeting ran late":
-        suggestion = (
-            "Your meeting ran late. Consider moving your next "
-            "study session to a later time."
-        )
-        proposed_time = "2:00 PM"
-    elif trigger == "I am feeling tired":
-        suggestion = (
-            "Your energy is low. Consider replacing your next "
-            "challenging task with a lighter reading session."
-        )
-        proposed_time = "Keep the same time"
-    else:
-        suggestion = (
-            "You missed a study session. Consider adding it "
-            "to a later open time in your day."
-        )
-        proposed_time = "4:00 PM"
+    trigger = st.selectbox("Choose a disruption", list(DISRUPTIONS))
 
     if st.button(
         "Suggest a new plan",
         type="primary",
-        use_container_width=True
+        width="stretch"
     ):
-        st.session_state.disruption_message = suggestion
-        st.session_state.proposed_time = proposed_time
-        st.session_state.proposal_pending = True
+        st.session_state.proposal = backend.disrupt(trigger)
+        st.session_state.replan_result = ""
 
-    if st.session_state.get("proposal_pending", False):
+    proposal = st.session_state.proposal
+
+    if proposal is not None:
 
         st.markdown("---")
 
         st.markdown(
-            '<div class="section-heading">Your proposed change</div>',
+            '<div class="section-heading">Your planner says</div>',
             unsafe_allow_html=True
         )
+
+        change = proposal.proposed_change
+        if backend.is_ask(proposal):
+            detail = "No change yet. Tell me what changed and I'll adjust."
+        else:
+            start = datetime.fromisoformat(change["new_start"])
+            end = datetime.fromisoformat(change["new_end"])
+            detail = (
+                f'Suggested: "{change.get("title") or "this session"}" '
+                f'{start.strftime("%I:%M %p").lstrip("0")}-{end.strftime("%I:%M %p").lstrip("0")}'
+            )
 
         st.markdown(f"""
         <div class="recommendation-card">
@@ -1194,43 +1193,71 @@ elif page == "Replanning":
                 ✦ PLANNER SUGGESTION
             </div>
             <div class="recommendation-title">
-                {st.session_state.disruption_message}
+                {proposal.message}
             </div>
             <div class="recommendation-description">
-                Suggested adjustment: {st.session_state.proposed_time}
+                {detail}
             </div>
         </div>
         """, unsafe_allow_html=True)
 
         st.write("")
 
-        accept_col, reject_col = st.columns(2)
+        if backend.is_ask(proposal):
 
-        with accept_col:
-            if st.button(
-                "Accept suggestion",
-                type="primary",
-                use_container_width=True
-            ):
-                st.session_state.replan_result = (
-                    "Your suggested change has been accepted in the demo."
+            with st.form("ask_form", clear_on_submit=True):
+                answer = st.text_input(
+                    "What changed?",
+                    placeholder='e.g. "I\'m wiped, 20 minutes max" or "let\'s do it tomorrow"',
                 )
-                st.session_state.proposal_pending = False
+                send_col, skip_col = st.columns(2)
+                with send_col:
+                    sent = st.form_submit_button(
+                        "Tell the planner", type="primary", width="stretch"
+                    )
+                with skip_col:
+                    skipped = st.form_submit_button(
+                        "Never mind", width="stretch"
+                    )
+            if sent or skipped:
+                st.session_state.replan_result = backend.answer_ask(
+                    proposal, answer if sent else "never mind"
+                )
+                st.session_state.proposal = None
                 st.rerun()
 
-        with reject_col:
-            if st.button(
-                "Keep my original plan",
-                use_container_width=True
-            ):
-                st.session_state.replan_result = (
-                    "Your original plan has been kept."
-                )
-                st.session_state.proposal_pending = False
-                st.rerun()
+        else:
 
-    if st.session_state.get("replan_result"):
+            accept_col, reject_col = st.columns(2)
+
+            with accept_col:
+                if st.button(
+                    "Accept suggestion",
+                    type="primary",
+                    width="stretch"
+                ):
+                    st.session_state.replan_result = backend.respond(proposal, "accept")
+                    st.session_state.proposal = None
+                    st.rerun()
+
+            with reject_col:
+                if st.button(
+                    "Keep my original plan",
+                    width="stretch"
+                ):
+                    st.session_state.replan_result = backend.respond(proposal, "reject")
+                    st.session_state.proposal = None
+                    st.rerun()
+
+    if st.session_state.replan_result:
         st.success(st.session_state.replan_result)
+
+        st.markdown(
+            '<div class="section-heading">Today\'s schedule now</div>',
+            unsafe_allow_html=True
+        )
+        for item in backend.schedule_items():
+            schedule_card(item)
 
 
 # ==========================================================
@@ -1244,6 +1271,6 @@ st.markdown("""
     THE 12TH INTERFACE<br>
     Plan smarter. Study better. Work with your energy.
     <br><br>
-    Early prototype · Illustrative data
+    Prototype · Live planner, sample schedule
 </div>
 """, unsafe_allow_html=True)
