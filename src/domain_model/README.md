@@ -91,6 +91,34 @@ from tests.domain_model.pilot_recommendations import pilot_set
 pilot_set()  # one dict per scenario: energy inputs + recommended_task_type, why, explanation_source
 ```
 
+## Onboarding and saving a mapping (Phase 3)
+
+```bash
+PYTHONPATH=src python -m domain_model.onboarding --student-id s1 --out profiles/s1_tasks.json
+```
+
+Asks which kind of task the student prefers when tired, so-so and energized
+(a number 1-4 or a name; Enter = no preference, which keeps the default rule),
+re-asks on invalid answers, shows the first recommendation and "because ..."
+for each energy level, and saves the mapping as JSON. It refuses to overwrite
+an existing file, and cancelling saves nothing. `run_onboarding(mapping,
+ask=..., say=...)` is importable, so integration can run it right after
+`user_model`'s sleep questions for one combined onboarding.
+
+To load it back:
+
+```python
+import json
+from domain_model import StudentTaskMapping
+
+mapping = StudentTaskMapping.from_dict(json.loads(open("profiles/s1_tasks.json").read()))
+```
+
+The dict keeps everything the planner has learned (learned weight,
+preferences, survey answers and per-bucket choice counts), so a restored
+mapping recommends, explains and keeps learning exactly like the original.
+A stored mapping with a different `schema_version` raises `ValueError`.
+
 ## TODO
 
 - [x] Finalize the fixed taxonomy (`TaskType` enum) — problem sets, reading,
@@ -105,8 +133,13 @@ pilot_set()  # one dict per scenario: energy inputs + recommended_task_type, why
 - [x] Survey split agreed: sleep/schedule in `user_model.apply_sleep_survey`,
       task preferences here via `StudentTaskMapping.from_survey(...)`
 - [x] Pilot dry-run: real recommendations for the pilot scenarios
-- [ ] Persist survey answers and choice counts (they are plain attributes, not
-      contract fields, so they aren't saved with the dataclass yet)
+- [x] Serialization: `StudentTaskMapping.to_dict()` / `from_dict()` (plain
+      JSON-safe dict with `schema_version`, same style as `user_model`),
+      including the survey answers and per-bucket choice counts
+- [x] CLI onboarding survey: `python -m domain_model.onboarding` feeds real
+      task-preference answers into `set_survey_answers()`
+- [ ] Persist the mapping per student (backend TBD with integration, same as
+      `user_model`'s profile)
 - [ ] Tune `PRIOR_STRENGTH` against real study-scenario data (Nov 20 milestone)
 
 ## Prompt for your AI assistant

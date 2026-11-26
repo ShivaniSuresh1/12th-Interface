@@ -24,8 +24,13 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import Any
 
 from .taxonomy import Task, TaskType
+
+# Version of the to_dict()/from_dict() format. Bump it if the dict shape changes,
+# so stored mappings written by an older version are rejected instead of misread.
+SCHEMA_VERSION = 1
 
 # Bucket cut points. negotiation.replanning mirrors these (LOW_ENERGY /
 # HIGH_ENERGY), so change both together.
@@ -186,6 +191,56 @@ class StudentTaskMapping:
             f"Your recommendations are now {learned}% based on your own choices "
             f"and {100 - learned}% on your {source}."
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe copy for storage (e.g. `json.dumps`), including the survey
+        answers and per-bucket choice counts that aren't dataclass fields."""
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "student_id": self.student_id,
+            "learned_weight": self.learned_weight,
+            "preferences": {b: t.value for b, t in self.preferences.items()},
+            "survey": {b: t.value for b, t in self._survey.items()},
+            "choice_counts": {
+                b: {t.value: c for t, c in self._counts[b].items()} for b in BUCKETS
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> StudentTaskMapping:
+        """Inverse of `to_dict`. Missing optional keys fall back to the defaults
+        of a new mapping (without `choice_counts`, each preference counts as one
+        choice, as when built from fields). A different `schema_version`, an
+        unknown bucket or task type, or an invalid weight or count raises
+        ValueError."""
+        version = data.get("schema_version", SCHEMA_VERSION)
+        if version != SCHEMA_VERSION:
+            raise ValueError(
+                f"stored mapping has schema_version {version}, expected {SCHEMA_VERSION}"
+            )
+        try:
+            weight = float(data.get("learned_weight", 0.0))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"unreadable learned_weight: {data.get('learned_weight')!r}") from e
+        mapping = cls(
+            student_id=data["student_id"],
+            learned_weight=weight,
+            preferences=dict(data.get("preferences") or {}),
+        )
+        mapping.set_survey_answers(data.get("survey") or {})
+
+        stored = data.get("choice_counts")
+        if stored is not None:
+            counts: dict[str, Counter[TaskType]] = {b: Counter() for b in BUCKETS}
+            for bucket, per_type in stored.items():
+                _check_bucket(bucket)
+                for task_type, count in per_type.items():
+                    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                        raise ValueError(f"choice count must be a whole number >= 0, got {count!r}")
+                    if count:
+                        counts[bucket][TaskType(task_type)] = count
+            mapping._counts = counts
+        return mapping
 
 
 def recommend_task_type(
