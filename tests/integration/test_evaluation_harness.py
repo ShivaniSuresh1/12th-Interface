@@ -167,15 +167,27 @@ def _answers(*values):
     return lambda _prompt: next(it)
 
 
-# Per scenario: decision, [edit note if "e"], trust, confidence.
+# Participant 2 sees s2, s4 (ask), s6, s1, s3, s5. Per scenario: decision,
+# [note after edit/reject, or after "y" on an ask], trust, confidence.
 SESSION_ANSWERS = (
-    "x", "a", "5", "6",            # "x" is invalid and gets re-asked
-    "e", "make it shorter", "9", "3", "4",  # "9" is out of range and gets re-asked
-    "r", "2", "6",
-    "a", "7", "7",
-    "a", "6", "5",
-    "r", "1", "7",
+    "x", "a", "5", "6",                                  # s2: "x" is invalid and gets re-asked
+    "e", "y", "my meeting ran late", "9", "3", "4",      # s4 ask: a/e/r keys aren't valid; "9" re-asked
+    "r", "a shorter session", "2", "6",                  # s6: reject note
+    "e", "make it shorter", "7", "7",                    # s1: edit note
+    "a", "6", "5",                                       # s3
+    "r", "", "1", "7",                                   # s5: reject note skipped with Enter
 )
+
+
+def _by_prompt(prompt):
+    """Answer any session prompt sensibly, whatever order the scenarios come in."""
+    if "[y/n]" in prompt:
+        return "n"
+    if "[a/e/r]" in prompt:
+        return "a"
+    if "1 = not at all" in prompt:
+        return "4"
+    return ""
 
 
 def _fake_clock():
@@ -188,13 +200,17 @@ def test_session_logs_every_answer(tmp_path, capsys):
         2, SCENARIOS, input_fn=_answers(*SESSION_ANSWERS), log_dir=tmp_path, clock=_fake_clock(),
         with_survey=False,
     )
-    assert [r["decision"] for r in rows] == ["accept", "edit", "reject", "accept", "accept", "reject"]
+    assert [r["scenario_id"][:2] for r in rows] == ["s2", "s4", "s6", "s1", "s3", "s5"]
+    assert [r["decision"] for r in rows] == ["accept", "accept", "reject", "edit", "accept", "reject"]
     assert [r["trust"] for r in rows] == [5, 3, 2, 7, 6, 1]
     assert [r["confidence"] for r in rows] == [6, 4, 6, 7, 5, 7]
-    assert rows[1]["edit_note"] == "make it shorter"
+    assert [r["note"] for r in rows] == [
+        "", "my meeting ran late", "a shorter session", "make it shorter", "", "",
+    ]
     assert all(r["decision_time_s"] == 2.0 for r in rows)
     out = capsys.readouterr().out
     assert "Please type a, e, or r." in out
+    assert "Please type y or n." in out
     assert "Please type a whole number from 1 to 7." in out
 
     with log_path(2, tmp_path).open(newline="") as f:
@@ -207,7 +223,7 @@ def test_session_logs_every_answer(tmp_path, capsys):
 def test_log_records_what_was_decided_on(tmp_path):
     by_id = {s.scenario_id: s for s in SCENARIOS}
     rows = run_session(
-        1, SCENARIOS, input_fn=_answers(*SESSION_ANSWERS),
+        1, SCENARIOS, input_fn=_by_prompt,
         log_dir=tmp_path, clock=_fake_clock(), with_survey=False,
     )
     for r in rows:
@@ -253,8 +269,28 @@ def test_survey_saves_one_row_per_question(tmp_path, capsys):
     assert [r["question_id"] for r in saved] == [q.question_id for q in QUESTIONS]
 
 
+def _same_answer_everywhere(participant, decision, trust, confidence):
+    """Session answers for one participant who gives the same decision every time.
+
+    "a" / "r" become "y" / "n" on the ask scenario; optional notes are skipped.
+    """
+    answers = []
+    for scenario, _condition in assign(participant, SCENARIOS):
+        is_ask = (run_scenario(scenario).proposed_change or {}).get("action") == "ask"
+        if is_ask:
+            answers.append({"a": "y", "r": "n"}[decision])
+            if decision == "a":
+                answers.append("")
+        else:
+            answers.append(decision)
+            if decision == "r":
+                answers.append("")
+        answers += [trust, confidence]
+    return tuple(answers)
+
+
 def test_full_session_ends_with_the_survey(tmp_path):
-    scenario_answers = ("a", "5", "5") * len(SCENARIOS)
+    scenario_answers = _same_answer_everywhere(6, "a", "5", "5")
     run_session(
         6, SCENARIOS, input_fn=_answers(*scenario_answers, *SURVEY_ANSWERS),
         log_dir=tmp_path, clock=_fake_clock(),
@@ -277,7 +313,7 @@ def _four_participants(log_dir):
     # trust 6; even participants reject everything with trust 2.
     for participant in (1, 2, 3, 4):
         decision, trust = ("a", "6") if participant % 2 else ("r", "2")
-        answers = (decision, trust, "4") * len(SCENARIOS)
+        answers = _same_answer_everywhere(participant, decision, trust, "4")
         run_session(
             participant, SCENARIOS, input_fn=_answers(*answers, *SURVEY_ANSWERS),
             log_dir=log_dir, clock=_fake_clock(),
@@ -320,3 +356,79 @@ def test_analyze_with_no_logs(tmp_path):
     from integration.evaluation.analyze import report
 
     assert "No session logs found yet." in report(tmp_path)
+
+
+# -- dry-run fixes ---------------------------------------------------------------
+
+
+def test_ask_scenario_never_asks_to_accept_a_change(tmp_path):
+    prompts = []
+
+    def record(prompt):
+        prompts.append((len(prompts), prompt))
+        return _by_prompt(prompt)
+
+    rows = run_session(2, SCENARIOS, input_fn=record, log_dir=tmp_path, with_survey=False)
+    ask_row = next(r for r in rows if r["proposal_action"] == "ask")
+    assert ask_row["decision"] == "reject"  # "n": would rather the planner just decided
+    decision_prompts = [p for _, p in prompts if "[a/e/r]" in p or "[y/n]" in p]
+    assert sum("[y/n]" in p for p in decision_prompts) == 1
+    assert not any("proposed change" in p and "[y/n]" in p for p in decision_prompts)
+
+
+def test_trust_question_covers_rejected_suggestions():
+    from integration.evaluation.__main__ import TRUST_QUESTION
+
+    assert "even if you didn't go with it" in TRUST_QUESTION
+
+
+def test_analyze_reads_old_edit_note_column(tmp_path):
+    from integration.evaluation.analyze import report
+
+    old_fields = [f if f != "note" else "edit_note" for f in FIELDS]
+    path = log_path(1, tmp_path)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=old_fields)
+        writer.writeheader()
+        writer.writerow({
+            "participant": 1, "position": 1, "scenario_id": SCENARIOS[0].scenario_id,
+            "condition": "plain", "decided_on": "recommendation", "proposal_action": "",
+            "energy_level": 0.7, "recommended_task_type": "reading", "decision": "edit",
+            "edit_note": "later please", "trust": 4, "confidence": 5,
+            "decision_time_s": 3.0, "timestamp": "2026-11-25T20:00:00-06:00",
+        })
+    assert "later please" in report(tmp_path)
+
+
+# -- simulated participants --------------------------------------------------------
+
+
+def test_simulated_logs_are_marked_and_bannered(tmp_path):
+    from integration.evaluation.analyze import load_rows, report
+    from integration.evaluation.simulated import simulate
+
+    simulate(4, seed=1, log_dir=tmp_path)
+    assert (tmp_path / "SIMULATED.md").exists()
+    assert len(load_rows(tmp_path)) == 4 * len(SCENARIOS)
+    text = report(tmp_path)
+    assert text.startswith("# SIMULATED results (not real participants)")
+    assert "SIMULATED DATA" in text
+
+
+def test_simulation_is_reproducible(tmp_path):
+    from integration.evaluation.analyze import load_rows
+    from integration.evaluation.simulated import simulate
+
+    simulate(4, seed=7, log_dir=tmp_path / "a")
+    simulate(4, seed=7, log_dir=tmp_path / "b")
+    keep = ("scenario_id", "condition", "decision", "trust", "confidence", "decision_time_s")
+    a = [[r[k] for k in keep] for r in load_rows(tmp_path / "a")]
+    b = [[r[k] for k in keep] for r in load_rows(tmp_path / "b")]
+    assert a == b
+
+
+def test_real_logs_get_no_simulated_banner(tmp_path):
+    from integration.evaluation.analyze import report
+
+    _four_participants(tmp_path)
+    assert "SIMULATED" not in report(tmp_path)

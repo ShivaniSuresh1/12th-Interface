@@ -5,7 +5,36 @@ harness. Owner: Harshini. Design follows the team's evaluation plan:
 within-subjects, two conditions (explanation shown vs plain numbers),
 condition order and scenario sets counterbalanced, 6-10 outside participants.
 
-All commands run from the repo root with the venv active.
+All commands run from the repo root with the venv active. They are written
+for Mac/Linux; see "Windows" below for the PowerShell versions.
+
+## Setup (first time on a machine)
+
+A fresh checkout has no `.venv`, so create it first:
+
+```bash
+# Mac / Linux
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+```
+
+```powershell
+# Windows (PowerShell)
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt -r requirements-dev.txt
+```
+
+### Windows
+
+`PYTHONPATH=src python ...` doesn't work in PowerShell. Set the variable once
+per terminal, then run the same command without the prefix:
+
+```powershell
+$env:PYTHONPATH="src"
+python -m integration.evaluation run --participant 1
+```
 
 ## Before any session
 
@@ -61,14 +90,30 @@ PYTHONPATH=src python -m integration.evaluation run --participant 1
 > read 6 short situations. In each one, imagine you are the student described.
 >
 > After each one, tell me whether you'd **accept**, **edit** or **reject** what the
-> planner suggests. If it proposes a schedule change, you're deciding on that
-> change. If it asks you a question instead of proposing a change, "accept"
-> means you're happy to be asked. Then rate how much you trust its suggestion
-> and how confident you are in your own decision, from 1 to 7.
+> planner suggests, deciding as you would if you were that student. If it
+> proposes a schedule change, you're deciding on that change. If it asks you a
+> question instead, you'll just say whether you'd answer it. Then rate how much
+> you trust its suggestion, even if you didn't go with it, and how confident
+> you are in your own decision, from 1 to 7.
 >
+> You can't go back and change an answer, so go with your first reaction.
 > Some situations show more detail than others. That's intended. There are no
-> right answers, and we're testing the planner, not you. Go at your natural
-> pace. You'll answer a few short questions at the end.
+> right answers, and we're testing the planner, not you. Please read each
+> situation fully before you answer. You'll answer a few short questions at
+> the end.
+
+### Questions participants are likely to ask
+
+Answer these with the same words every time (they came up in the team dry-run):
+
+| Question | Answer |
+| --- | --- |
+| "Am I deciding as myself or as the student?" | "As yourself, imagining you're the student in the story." |
+| "Can I go back and change an answer?" | "No, go with your first reaction." |
+| "Should I rate trust even if I rejected it?" | "Yes, rate how much you trust what the planner suggested, whatever you decided." |
+| "What does it mean when the planner asks me a question?" | "Just say whether you'd answer it. If yes, you can type what you'd tell it." |
+
+Any other "what does this mean?" question: see below.
 
 During the session:
 
@@ -78,6 +123,9 @@ During the session:
 - Don't comment on their answers. Decision time is measured from when the
   scenario appears.
 - Let them type, or type exactly what they say.
+- Watch for click-through. In the team dry-run, plain scenarios were answered
+  in 1.6-4 seconds. If someone answers before they could have read the
+  scenario, note the participant number and scenario so the report can flag it.
 
 ### If something goes wrong
 
