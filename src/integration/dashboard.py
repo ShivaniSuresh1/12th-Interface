@@ -74,6 +74,7 @@ class DashboardSession:
     sleep_hours: float = 7.5
     clock: Callable[[], datetime] = now_local
     name: str = ""
+    email: str = ""  # set when the student has an account (email or Google)
     wake_time: time = DEFAULT_WAKE
     sample_day: bool = True  # add the sample study day for today
     planner: StudySessionPlanner = field(init=False)
@@ -102,6 +103,7 @@ class DashboardSession:
         typical_wake_time: time,
         task_preferences: dict[str, TaskType | str | None],
         clock: Callable[[], datetime] = now_local,
+        email: str = "",
     ) -> DashboardSession:
         """Combined onboarding: Shivani's sleep questions + Vyshnavi's task preferences.
 
@@ -113,6 +115,7 @@ class DashboardSession:
             sleep_hours=typical_sleep_hours,
             clock=clock,
             name=name,
+            email=email,
             wake_time=typical_wake_time,
             sample_day=False,
         )
@@ -139,6 +142,7 @@ class DashboardSession:
             "schema_version": 1,
             "student_id": self.student_id,
             "name": self.name,
+            "email": self.email,
             "wake_time": self.wake_time.strftime("%H:%M"),
             "profile": self.planner.profile.to_dict(),
             "task_mapping": self.planner.task_mapping.to_dict(),
@@ -159,6 +163,7 @@ class DashboardSession:
             sleep_hours=profile.sleep_hours if profile.sleep_hours is not None else 7.5,
             clock=clock,
             name=data.get("name", ""),
+            email=data.get("email", ""),
             wake_time=time.fromisoformat(data.get("wake_time", "07:30")),
             sample_day=False,
         )
