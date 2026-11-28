@@ -20,6 +20,7 @@ orange high).
 import math
 import os
 import sys
+import time as _time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -49,6 +50,19 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+def _use_local_timezone() -> None:
+    """Streamlit Cloud runs on UTC. Use the student's browser time zone instead, so
+    "now", today's schedule and the energy curve match their clock. Falls back to
+    a TWELFTH_TZ secret/env var (e.g. "America/Chicago"); no-op when neither is known."""
+    tz = st.context.timezone or os.environ.get("TWELFTH_TZ")
+    if tz and hasattr(_time, "tzset") and os.environ.get("TZ") != tz:
+        os.environ["TZ"] = tz
+        _time.tzset()
+
+
+_use_local_timezone()
 
 # ==========================================================
 # TOKENS
