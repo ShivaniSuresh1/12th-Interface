@@ -143,3 +143,30 @@ def test_sign_out_returns_to_landing():
     at = _signed_up()
     _click(at, "Sign out")
     assert "Get started" in [b.label for b in at.button]
+
+
+def test_new_students_start_with_an_empty_schedule_and_the_assistant():
+    at = _signed_up()
+    assert not any("sample" in s.value for s in at.success)
+    at.sidebar.radio[0].set_value("My Schedule").run()
+    assert any("build your week" in m.markdown[0].value for m in at.chat_message)
+
+
+def test_chat_builds_the_week_end_to_end():
+    at = _signed_up()
+    at.sidebar.radio[0].set_value("My Schedule").run()
+    for text in ["CSCE 634 MWF 10:20-11:10", "done", "IUI final report due in 5 days 3 hours",
+                 "stats homework due tomorrow 2h"]:
+        at.chat_input[0].set_value(text).run()
+        assert not at.exception
+    said = [m.markdown[0].value for m in at.chat_message]
+    assert any("Blocked your class" in s for s in said)
+    assert sum("Added" in s for s in said) >= 1
+    _click(at, "Plan my week")  # jumps to the Week view
+    assert at.radio(key="sched_view").value == "Week"
+    for view in ["Day", "Week"]:
+        at.radio(key="sched_view").set_value(view).run()
+        assert not at.exception
+    at.sidebar.radio[0].set_value("Insights").run()
+    assert not at.exception
+    assert any("Deadlines" in m.value for m in at.markdown)
