@@ -26,6 +26,7 @@ from pathlib import Path
 
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit.errors import StreamlitSecretNotFoundError
 
 # Let `streamlit run frontend/app.py` find the src/ packages without PYTHONPATH.
@@ -284,32 +285,7 @@ button:focus-visible {{ outline: 3px solid {HIGH} !important; outline-offset: 2p
 .bar i {{ display: block; height: 100%; background: {SIGNAL}; }}
 .devcode {{ font-family: 'JetBrains Mono', monospace; font-size: 22px; letter-spacing: .3em; color: {SIGNAL}; }}
 
-/* ---------- week + day timelines ---------- */
-.tl {{ background: {CARD}; border: 1.5px solid {LINE}; border-radius: 18px; padding: 14px 14px 10px 8px; overflow-x: auto; }}
-.tl-grid {{ display: grid; grid-template-columns: 58px repeat(var(--cols), minmax(var(--minw), 1fr)); column-gap: 6px; }}
-.tl-head {{ text-align: center; padding: 2px 0 10px 0; color: {MUTED}; font-size: 13px; font-weight: 600; }}
-.tl-head span {{ display: block; }}
-.tl-head b {{ display: inline-block; font-family: 'Archivo', sans-serif; font-stretch: 125%; font-size: 22px; color: {INK}; line-height: 1.1; }}
-.tl-head.today b {{ color: #fff; background: {SIGNAL}; border-radius: 10px; display: inline-block; padding: 0 9px; margin-top: 2px; }}
-.tl-gutter, .tl-col {{ position: relative; height: var(--h); }}
-.tl-col {{ border-radius: 12px; background: repeating-linear-gradient(to bottom, {LINE} 0 1px, transparent 1px var(--pph)); }}
-.tl-col.today {{ background-color: rgba(0,0,242,.035); }}
-.tl-hour {{ position: absolute; right: 8px; transform: translateY(-50%); font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {MUTED}; }}
-.tl-energy {{ position: absolute; left: 4px; width: 5px; border-radius: 3px; }}
-.blk {{ position: absolute; left: 3px; right: 3px; border-radius: 9px; padding: 4px 7px; overflow: hidden;
-        font-size: 12px; line-height: 1.25; color: {INK}; border-left: 4px solid var(--tint);
-        background: color-mix(in srgb, var(--tint) 14%, white); box-shadow: 0 1px 0 rgba(11,11,59,.05); }}
-.blk .bt {{ font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.blk .bm {{ font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: {MUTED}; }}
-.blk.fixed {{ --tint: {INK}; background: repeating-linear-gradient(135deg, #ECEDF7 0 6px, #F5F6FB 6px 12px); }}
-.blk.brk {{ --tint: {LINE}; background: transparent; border: 1.5px dashed {LINE}; }}
-.blk.done {{ opacity: .45; }}
-.blk.missed {{ border-left-style: dashed; background: #fff; }}
-.blk .fit {{ position: absolute; top: 4px; right: 6px; font-size: 11px; }}
-.tl.day .blk {{ font-size: 14px; padding: 6px 12px; }}
-.tl.day .blk .bm {{ font-size: 12px; }}
-.nowline {{ position: absolute; left: -4px; right: 0; height: 2px; background: {HIGH}; z-index: 3; }}
-.nowline::before {{ content: ""; position: absolute; left: -2px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: {HIGH}; }}
+/* ---------- calendar legend ---------- */
 .legend {{ display: flex; gap: 16px; flex-wrap: wrap; color: {MUTED}; font-size: 13px; margin: 10px 2px 0 2px; }}
 .legend i {{ display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 6px; vertical-align: -1px; }}
 
@@ -889,69 +865,222 @@ def _tint(block) -> str:
     return TASK_TINT.get(block["task_type"] or "", LINE)
 
 
-def _block_html(b, h0: int, pph: int, detailed: bool) -> str:
-    top = (b["start"].hour + b["start"].minute / 60 - h0) * pph
-    height = max(b["minutes"] / 60 * pph - 3, 16)
-    cls = ["blk"]
-    if b["kind"] in ("class", "other"):
-        cls.append("fixed")
-    elif b["kind"] == "break":
-        cls.append("brk")
-    if b["status"] in ("Completed", "Done") and b["kind"] == "study":
+# -- the calendar: Google-Calendar-style hours, mission-control look ----------
+# Sky behind the hour gutter runs night -> dawn -> day -> dusk -> night, like a
+# launch day seen from the pad; events are chunky "toy" tiles with a hard shadow.
+
+SKY = [(0, "#070726"), (4.5, "#1B1660"), (6, "#7A4DD8"), (7, "#FF9E7A"), (8.5, "#FFE3C8"),
+       (11, "#E3EDFF"), (15.5, "#E3EDFF"), (17.5, "#FFD2A8"), (19, "#FF7A2F"), (20.5, "#5B2FB8"),
+       (22, "#1B1660"), (24, "#070726")]
+HOUR_PX = 60
+
+
+def _ampm(h: float) -> str:
+    hh, mm = int(h), round((h % 1) * 60)
+    suffix = "AM" if hh < 12 or hh == 24 else "PM"
+    h12 = hh % 12 or 12
+    return f"{h12}{f':{mm:02d}' if mm else ''} {suffix}"
+
+
+def _range(b) -> str:
+    s = b["start"].hour + b["start"].minute / 60
+    e = b["end"].hour + b["end"].minute / 60
+    a, z = _ampm(s), _ampm(e)
+    if a[-2:] == z[-2:]:
+        a = a[:-3]
+    return f"{a} – {z}"
+
+
+def _lanes(blocks):
+    """Google-style overlap layout: events that overlap share the width side by side."""
+    out, cluster, cluster_end = [], [], None
+
+    def flush():
+        lanes_end = []
+        placed = []
+        for b in cluster:
+            for i, end in enumerate(lanes_end):
+                if end <= b["start"]:
+                    lanes_end[i] = b["end"]
+                    placed.append((b, i))
+                    break
+            else:
+                lanes_end.append(b["end"])
+                placed.append((b, len(lanes_end) - 1))
+        out.extend((b, i, len(lanes_end)) for b, i in placed)
+
+    for b in sorted(blocks, key=lambda b: (b["start"], -b["minutes"])):
+        if cluster and b["start"] >= cluster_end:
+            flush()
+            cluster = []
+        if not cluster:
+            cluster_end = b["end"]
+        cluster.append(b)
+        cluster_end = max(cluster_end, b["end"])
+    if cluster:
+        flush()
+    return out
+
+
+def _event_html(b, lane: int, lanes: int, detailed: bool, now: datetime) -> str:
+    top = (b["start"].hour + b["start"].minute / 60) * HOUR_PX
+    height = max(b["minutes"] / 60 * HOUR_PX - 4, 20)
+    width = 100 / lanes
+    fixed = b["kind"] in ("class", "other")
+    cls = ["ev", "fixed" if fixed else "brk" if b["kind"] == "break" else "study"]
+    if b["end"] <= now:
+        cls.append("past")
+    if b["status"] == "Completed":
         cls.append("done")
     if b["status"] == "Missed":
         cls.append("missed")
-    kind = (TaskType(b["task_type"]).label.capitalize() if b["task_type"]
-            else "Class" if b["kind"] == "class" else b["kind"].capitalize())
-    meta = f'{b["start"]:%H:%M}–{b["end"]:%H:%M}' + (f" · {kind}" if detailed else "")
+    if height < 34:
+        cls.append("tiny")
+    kind = ("Class" if b["kind"] == "class" else "Busy" if fixed else
+            "Break" if b["kind"] == "break" else TaskType(b["task_type"]).label.capitalize())
+    badge = ""
     if b["status"] == "Completed":
-        meta += " · done ✓"
+        badge = '<span class="badge">✓ done</span>'
     elif b["status"] == "Missed":
-        meta += " · missed"
-    fit = '<span class="fit" title="Fits your energy at this time">⚡</span>' if b["fits"] else ""
-    show_meta = height >= 30
-    return (f'<div class="{" ".join(cls)}" style="top:{top:.0f}px;height:{height:.0f}px;--tint:{_tint(b)}" '
-            f'title="{b["title"]} {meta}">{fit}<div class="bt">{b["title"]}</div>'
-            + (f'<div class="bm">{meta}</div>' if show_meta else "") + "</div>")
+        badge = '<span class="badge warn">missed</span>'
+    elif b["fits"]:
+        badge = '<span class="badge zap" title="Fits your energy at this time">⚡</span>'
+    extra = (f'<div class="em">{kind} · {b["minutes"]} min'
+             + (" · fits your energy" if b["fits"] and detailed else "") + "</div>") if height >= (72 if detailed else 64) else ""
+    return (
+        f'<div class="{" ".join(cls)}" style="top:{top:.1f}px;height:{height:.1f}px;'
+        f'left:calc({lane * width:.3f}% + 3px);width:calc({width:.3f}% - 7px);--tint:{_tint(b)}" '
+        f'title="{b["title"]} · {_range(b)} · {kind}">'
+        f'{badge}<div class="et">{b["title"]}</div><div class="eh">{_range(b)}</div>{extra}</div>'
+    )
 
 
-def timeline_html(days, detailed: bool = False, pph: int = 44) -> str:
-    """A calendar: one column per day, hour lines, blocks placed by time, energy strip, now line."""
-    blocks = [b for d in days for b in d["blocks"]]
-    h0 = min([7, *[b["start"].hour for b in blocks]])
-    h1 = max([22, *[b["end"].hour + (1 if b["end"].minute else 0) for b in blocks]])
-    height = (h1 - h0) * pph
+def calendar_html(days, due: dict | None = None, detailed: bool = False) -> str:
+    """A full 24-hour calendar (scrolls), sticky day headers, deadlines lane, live now line."""
+    due = due or {}
     now = datetime.now().astimezone()
-    curve = {_hour_of(t): p for t, p in backend.energy_curve(range(h0, h1))}
-    gutter = "".join(f'<div class="tl-hour" style="top:{(h - h0) * pph}px">{h:02d}:00</div>'
-                     for h in range(h0 + 1, h1))
-    gutter += "".join(
-        f'<div class="tl-energy" style="top:{(h - h0) * pph + 2}px;height:{pph - 4}px;'
-        f'background:{energy_color(p)};opacity:{0.25 + p / 160:.2f}" title="Typical energy {p}%"></div>'
-        for h, p in curve.items())
-    head = '<div class="tl-head"></div>'
-    cols = ""
+    n = len(days)
+    stops = ", ".join(f"{c} {h / 24 * 100:.2f}%" for h, c in SKY)
+    labels = "".join(
+        f'<div class="hl{" night" if h < 6 or h >= 20 else ""}" style="top:{h * HOUR_PX}px">{_ampm(h)}</div>'
+        for h in range(1, 24))
+    stars = "".join(
+        f'<i class="star" style="top:{y}px;left:{x}px;animation-delay:{d}s"></i>'
+        for x, y, d in [(10, 40, 0), (34, 90, 1.2), (18, 170, .5), (44, 230, 2), (12, 300, 1.6), (40, 1250, .8),
+                        (16, 1300, 2.4), (36, 1370, .3), (22, 1420, 1.9)])
+    sun = f'<div class="orb sun" style="top:{12.5 * HOUR_PX}px">☀</div><div class="orb moon" style="top:{2 * HOUR_PX}px">☾</div>'
+    heads, lanes_row, cols = "", "", ""
+    first_event = 24.0
     for d in days:
-        today = d["date"] == now.date()
-        name = f'{d["date"]:%A, %B}' if detailed else f'{d["date"]:%a}'
-        head += f'<div class="tl-head{" today" if today else ""}"><span>{name}</span><b>{d["date"].day}</b></div>'
-        inner = "".join(_block_html(b, h0, pph, detailed) for b in d["blocks"])
-        if today and h0 <= now.hour < h1:
-            inner += f'<div class="nowline" style="top:{(now.hour + now.minute / 60 - h0) * pph:.0f}px"></div>'
-        cols += f'<div class="tl-col{" today" if today else ""}">{inner}</div>'
-    minw = "220px" if detailed else "92px"
-    return (f'<div class="tl{" day" if detailed else ""}"><div class="tl-grid" style="--cols:{len(days)};'
-            f'--minw:{minw};--h:{height}px;--pph:{pph}px">{head}<div class="tl-gutter">{gutter}</div>{cols}'
-            '</div></div>')
+        is_today = d["date"] == now.date()
+        heads += (f'<div class="dh{" today" if is_today else ""}{" past" if d["date"] < now.date() else ""}">'
+                  f'<span>{d["date"]:%a}</span><b>{d["date"].day}</b></div>')
+        chips = "".join(f'<div class="due" style="--tint:{TASK_TINT.get(t, MID)}" title="Due: {title}">'
+                        f"⚑ {title}</div>" for title, t in due.get(d["date"], []))
+        lanes_row += f'<div class="dl">{chips}</div>'
+        events = "".join(_event_html(b, lane, k, detailed, now) for b, lane, k in _lanes(d["blocks"]))
+        for b in d["blocks"]:
+            first_event = min(first_event, b["start"].hour + b["start"].minute / 60)
+        now_line = (f'<div class="now" id="now" style="top:{(now.hour + now.minute / 60) * HOUR_PX:.1f}px"></div>'
+                    if is_today else "")
+        cols += f'<div class="col{" today" if is_today else ""}">{events}{now_line}</div>'
+    has_today = any(d["date"] == now.date() for d in days)
+    scroll_to = max(0.0, (now.hour + now.minute / 60 - 2) if has_today else min(first_event - 1, 7.5)) * HOUR_PX
+    grid = f"64px repeat({n}, minmax({240 if detailed else 104}px, 1fr))"
+    return f"""<!doctype html><html><head>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+* {{ box-sizing: border-box; }}
+html, body {{ margin: 0; background: transparent; font-family: 'Archivo', system-ui, sans-serif; color: {INK}; }}
+.cal {{ height: 712px; margin: 0 8px 8px 0; overflow: auto; border: 2px solid {INK}; border-radius: 22px; background: #FBFBFF;
+        box-shadow: 6px 6px 0 {INK}; scrollbar-width: thin; }}
+.row {{ display: grid; grid-template-columns: {grid}; }}
+.top {{ position: sticky; top: 0; z-index: 20; background: #FBFBFF; border-bottom: 2px solid {INK}; }}
+.dh {{ text-align: center; padding: 10px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: .14em;
+       text-transform: uppercase; color: {MUTED}; }}
+.dh b {{ display: block; margin: 4px auto 0; width: 44px; height: 44px; line-height: 44px; border-radius: 50%;
+         font-stretch: 125%; font-size: 24px; letter-spacing: -.02em; color: {INK}; }}
+.dh.today span {{ color: {HIGH}; }}
+.dh.today b {{ background: {HIGH}; color: #fff; box-shadow: 3px 3px 0 {INK}; border: 2px solid {INK}; line-height: 40px; }}
+.dh.past b {{ color: {MUTED}; }}
+.corner {{ font-family: 'JetBrains Mono', monospace; font-size: 10px; color: {MUTED}; padding: 12px 0 0 8px; }}
+.dl {{ min-height: 26px; padding: 3px 3px 6px; display: flex; flex-direction: column; gap: 3px; }}
+.due {{ font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 8px; background: #fff;
+        border: 1.5px solid {INK}; border-left: 5px solid var(--tint); white-space: nowrap; overflow: hidden;
+        text-overflow: ellipsis; }}
+.body {{ position: relative; height: {24 * HOUR_PX}px; }}
+.gutter {{ position: relative; height: 100%; background: linear-gradient(to bottom, {stops}); border-right: 2px solid {INK}; overflow: hidden; }}
+.hl {{ position: absolute; right: 8px; transform: translateY(-50%); font-family: 'JetBrains Mono', monospace;
+       font-size: 10.5px; font-weight: 600; color: {INK}; }}
+.hl.night {{ color: rgba(255,255,255,.85); }}
+.star {{ position: absolute; width: 3px; height: 3px; border-radius: 50%; background: #fff; animation: tw 3s infinite ease-in-out; }}
+@keyframes tw {{ 50% {{ opacity: .2; }} }}
+.orb {{ position: absolute; left: 6px; font-size: 16px; transform: translateY(-50%); }}
+.orb.sun {{ color: {HIGH}; }}
+.orb.moon {{ color: #fff; }}
+.col {{ position: relative; height: 100%; border-right: 1px solid {LINE};
+        background: repeating-linear-gradient(to bottom, {LINE} 0 1px, transparent 1px {HOUR_PX // 2}px,
+                    #EEF0F8 {HOUR_PX // 2}px {HOUR_PX // 2 + 1}px, transparent {HOUR_PX // 2 + 1}px {HOUR_PX}px); }}
+.col.today {{ background-color: rgba(255,122,47,.05); }}
+.ev {{ position: absolute; border-radius: 12px; padding: 5px 9px; overflow: hidden; cursor: default;
+       border: 2px solid {INK}; box-shadow: 3px 3px 0 {INK}; transition: transform .15s ease, box-shadow .15s ease; z-index: 2; }}
+.ev:hover {{ transform: translate(-2px, -2px) rotate(-.6deg); box-shadow: 6px 6px 0 {INK}; z-index: 5; }}
+.ev.study {{ background: var(--tint); color: #fff; }}
+.ev.fixed {{ background: repeating-linear-gradient(135deg, #FFF3E2 0 7px, #FFE8CC 7px 14px); color: {INK}; }}
+.ev.brk {{ background: #fff; border-style: dashed; box-shadow: none; color: {MUTED}; }}
+.ev.past {{ opacity: .55; }}
+.ev.done {{ opacity: .45; filter: saturate(.5); }}
+.ev.missed {{ background: #fff; color: {INK}; border-style: dashed; }}
+.et {{ font-weight: 800; font-stretch: 110%; font-size: 13px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 18px; }}
+.eh {{ font-family: 'JetBrains Mono', monospace; font-size: 10.5px; opacity: .85; margin-top: 1px; white-space: nowrap; }}
+.em {{ font-size: 11.5px; opacity: .85; margin-top: 3px; }}
+.ev.tiny {{ display: flex; gap: 8px; align-items: center; padding: 1px 8px; }}
+.ev.tiny .eh {{ margin: 0; }}
+{"" if detailed else ".ev.tiny .eh { display: none; } .ev.tiny .et { padding-right: 14px; }"}
+.badge {{ position: absolute; top: 4px; right: 6px; font-size: 10.5px; font-weight: 700; }}
+.badge.warn {{ color: {HIGH}; }}
+.now {{ position: absolute; left: -2px; right: 0; height: 2.5px; background: {HIGH}; z-index: 8; }}
+.now::before {{ content: ""; position: absolute; left: -6px; top: -5px; width: 12px; height: 12px; border-radius: 50%;
+                background: {HIGH}; border: 2px solid {INK}; }}
+.now::after {{ content: attr(data-t); position: absolute; right: 4px; top: -18px; font-family: 'JetBrains Mono', monospace;
+               font-size: 10px; font-weight: 600; color: #fff; background: {HIGH}; border-radius: 6px; padding: 1px 6px; }}
+{".ev .et { font-size: 15.5px; } .ev .eh { font-size: 12px; } .ev .em { font-size: 13px; }" if detailed else ""}
+@media (prefers-reduced-motion: reduce) {{ .star {{ animation: none; }} .ev {{ transition: none; }} }}
+</style></head><body>
+<div class="cal" id="cal">
+  <div class="top">
+    <div class="row"><div class="corner">{now:%Z}</div>{heads}</div>
+    <div class="row"><div class="corner">due</div>{lanes_row}</div>
+  </div>
+  <div class="row body"><div class="gutter">{stars}{sun}{labels}</div>{cols}</div>
+</div>
+<script>
+  const cal = document.getElementById("cal");
+  cal.scrollTop = {scroll_to:.0f};
+  function tick() {{
+    const el = document.getElementById("now");
+    if (!el) return;
+    const d = new Date();
+    el.style.top = ((d.getHours() + d.getMinutes() / 60) * {HOUR_PX}) + "px";
+    el.dataset.t = d.toLocaleTimeString([], {{hour: "numeric", minute: "2-digit"}});
+  }}
+  tick(); setInterval(tick, 30000);
+</script></body></html>"""
+
+
+def due_by_day() -> dict:
+    out: dict = {}
+    for t in backend.todo:
+        out.setdefault(t.due, []).append((t.title, t.task_type))
+    return out
 
 
 LEGEND = _flat(f"""
 <div class="legend">
   <span><i style="background:{HIGH}"></i>Problem sets</span><span><i style="background:{MID}"></i>Review</span>
   <span><i style="background:#2FA8FF"></i>Reading</span><span><i style="background:#C04CFF"></i>Memorization</span>
-  <span><i style="background:repeating-linear-gradient(135deg,#D9DBEA 0 3px,#F5F6FB 3px 6px);border:1px solid {INK}"></i>Classes &amp; fixed</span>
-  <span>⚡ fits your energy then</span>
-  <span><i style="background:linear-gradient({LOW},{MID},{HIGH})"></i>left strip: your typical energy</span>
+  <span><i style="background:repeating-linear-gradient(135deg,#FFF3E2 0 3px,#FFE8CC 3px 6px);border:1.5px solid {INK}"></i>Classes &amp; busy</span>
+  <span>⚡ fits your energy · ⚑ due date · left edge: the sky over your day</span>
 </div>""")
 
 
@@ -1152,7 +1281,7 @@ elif page == "My Schedule":
         days = backend.week(monday)
         st.markdown(f'<p class="quiet">{monday:%B} {monday.day} – {(monday + timedelta(days=6)):%B} '
                     f'{(monday + timedelta(days=6)).day}</p>', unsafe_allow_html=True)
-        st.markdown(timeline_html(days), unsafe_allow_html=True)
+        components.html(calendar_html(days, due_by_day()), height=740)
         st.markdown(LEGEND, unsafe_allow_html=True)
         if not any(d["blocks"] for d in days):
             st.info("Nothing here yet. Go to **Plan with me** and tell the assistant your classes and tasks.")
@@ -1166,8 +1295,8 @@ elif page == "My Schedule":
         blocks = backend.day_blocks(picked)
         left, right = st.columns([1.5, 1], gap="large")
         with left:
-            st.markdown(timeline_html([{"date": picked, "blocks": blocks}], detailed=True, pph=56),
-                        unsafe_allow_html=True)
+            components.html(calendar_html([{"date": picked, "blocks": blocks}], due_by_day(), detailed=True),
+                            height=740)
         with right:
             st.markdown('<div class="section" style="margin-top:0">Sessions</div>', unsafe_allow_html=True)
             sessions = [b for b in blocks if b["kind"] == "study"]
