@@ -152,6 +152,18 @@ button:focus-visible {{ outline: 3px solid {HIGH} !important; outline-offset: 2p
     color: {INK} !important; -webkit-text-fill-color: {INK}; fill: {INK};
 }}
 [data-testid="stSidebar"] .stButton > button {{ background: transparent; border-color: rgba(255,255,255,.4); }}
+.st-key-navlist {{ gap: 2px; margin-bottom: 10px; }}
+.st-key-navlist .stButton > button {{
+    border: none !important; background: transparent !important; justify-content: flex-start;
+    padding: 10px 14px; border-radius: 10px; box-shadow: none;
+}}
+.st-key-navlist .stButton > button > div, .st-key-navlist .stButton > button [data-testid="stMarkdownContainer"] {{
+    justify-content: flex-start; text-align: left; width: 100%;
+}}
+.st-key-navlist .stButton > button p {{ font-weight: 600; opacity: .72; color: #fff !important; }}
+.st-key-navlist .stButton > button:hover {{ background: rgba(255,255,255,.08) !important; }}
+.st-key-navlist .stButton > button[kind^="primary"] {{ background: rgba(255,255,255,.14) !important; }}
+.st-key-navlist .stButton > button[kind^="primary"] p {{ opacity: 1; }}
 .brand {{ font-weight: 800; font-size: 19px; letter-spacing: -0.01em; }}
 .brand-sub {{ opacity: .7; font-size: 14px; margin: 2px 0 20px 0; }}
 .who {{ display: flex; gap: 10px; align-items: center; padding: 12px; border-radius: 14px;
@@ -746,6 +758,28 @@ def setup():
             st.rerun()
 
 
+# ==========================================================
+# PAGES: every section has its own short link (/schedule, /insights, ...)
+# ==========================================================
+
+NAV = [("Home", "home"), ("My Schedule", "schedule"), ("Insights", "insights"),
+       ("Study Mode", "study"), ("Replanning", "replan")]
+
+
+def _route(slug: str, title: str):
+    def run():
+        st.set_page_config(page_title=f"{title} · The 12th Interface")
+        globals()[f"page_{slug}"]()  # the page functions are defined further down
+    run.__name__ = f"page_{slug}_route"
+    return run
+
+
+PAGES = {
+    slug: st.Page(_route(slug, title), title=title, default=slug == "home", **({} if slug == "home" else {"url_path": slug}))
+    for title, slug in NAV
+}
+current_page = st.navigation(list(PAGES.values()), position="hidden")
+
 if "backend" not in st.session_state:
     if GOOGLE and st.user.is_logged_in and st.session_state.account is None:
         enter(st.user.email, name=st.user.get("given_name") or st.user.get("name") or "")
@@ -1110,10 +1144,11 @@ def block_row(b):
 with st.sidebar:
     st.markdown('<div class="brand">The 12th Interface</div>'
                 '<div class="brand-sub">Your study companion</div>', unsafe_allow_html=True)
-    if st.session_state.get("goto"):
-        st.session_state.nav = st.session_state.pop("goto")
-    page = st.radio("Navigation", ["Home", "My Schedule", "Insights", "Study Mode", "Replanning"],
-                    label_visibility="collapsed", key="nav")
+    with st.container(key="navlist"):
+        for title, slug in NAV:
+            here = PAGES[slug] == current_page
+            if st.button(title, key=f"nav_{slug}", type="primary" if here else "secondary", width="stretch"):
+                st.switch_page(PAGES[slug])
     sleep = st.number_input("Last night's sleep (hours)", min_value=0.0, max_value=14.0,
                             value=float(backend.sleep_hours), step=0.5)
     if sleep != backend.sleep_hours:
@@ -1131,7 +1166,7 @@ with st.sidebar:
             del st.session_state[key]
         if google:
             st.logout()
-        st.rerun()
+        st.switch_page(PAGES["home"])
 
 schedule = backend.schedule_items()
 color = energy_color(pct)
@@ -1141,7 +1176,7 @@ color = energy_color(pct)
 # HOME
 # ==========================================================
 
-if page == "Home":
+def page_home():
     now = datetime.now()
     part = "morning" if now.hour < 12 else "afternoon" if now.hour < 17 else "evening"
     head, arc = st.columns([1.6, 1])
@@ -1204,15 +1239,14 @@ if page == "Home":
         if not today_blocks:
             st.caption("Nothing on today yet.")
             if st.button("Plan my week with the assistant", key="home_plan"):
-                st.session_state.goto = "My Schedule"
-                st.rerun()
+                st.switch_page(PAGES["schedule"])
 
 
 # ==========================================================
 # MY SCHEDULE
 # ==========================================================
 
-elif page == "My Schedule":
+def page_schedule():
     st.markdown('<div class="form-title">My schedule</div>', unsafe_allow_html=True)
     week_items = [b for d in backend.week() for b in d["blocks"] if b["kind"] == "study"]
     planned = sum(b["minutes"] for b in week_items)
@@ -1333,7 +1367,7 @@ elif page == "My Schedule":
 # INSIGHTS
 # ==========================================================
 
-elif page == "Insights":
+def page_insights():
     info = backend.insights()
     curve = backend.energy_curve()
     checkins = backend.checkin_history()
@@ -1462,7 +1496,7 @@ elif page == "Insights":
 # STUDY MODE
 # ==========================================================
 
-elif page == "Study Mode":
+def page_study():
     if backend.active_task:
         active = TaskType(backend.active_task)
         st.markdown(f"""
@@ -1498,7 +1532,7 @@ elif page == "Study Mode":
 # REPLANNING
 # ==========================================================
 
-elif page == "Replanning":
+def page_replan():
     st.markdown('<div class="form-title">Something changed?</div>', unsafe_allow_html=True)
     st.markdown('<p class="quiet">Tell me what happened. I\'ll suggest a change, '
                 "and nothing moves until you say so.</p>", unsafe_allow_html=True)
@@ -1558,6 +1592,8 @@ elif page == "Replanning":
         for item in backend.schedule_items():
             schedule_row(item)
 
+
+current_page.run()
 
 # Save after every interaction, so the next visit picks up here.
 store.save(backend)

@@ -36,6 +36,16 @@ def _click(at, label):
     assert not at.exception
 
 
+SLUGS = {"Home": "home", "My Schedule": "schedule", "Insights": "insights", "Study Mode": "study",
+         "Replanning": "replan"}
+
+
+def _go(at, page):
+    """Sidebar navigation: each section is its own page with its own URL."""
+    at.sidebar.button(key=f"nav_{SLUGS[page]}").click().run()
+    assert not at.exception
+
+
 def _dev_code(at):
     text = " ".join(i.value for i in at.info)
     return re.search(r"\b(\d{6})\b", text).group(1)
@@ -125,13 +135,13 @@ def test_wrong_password():
 @pytest.mark.parametrize("page", PAGES)
 def test_every_page_renders(page):
     at = _signed_up()
-    at.sidebar.radio[0].set_value(page).run()
+    _go(at, page)
     assert not at.exception
 
 
 def test_ask_flow_end_to_end():
     at = _signed_up()
-    at.sidebar.radio[0].set_value("Replanning").run()
+    _go(at, "Replanning")
     at.selectbox[0].set_value("Something else came up").run()
     _click(at, "Suggest a new plan")
     at.text_input[0].set_value("honestly I'm wiped, 20 minutes max")
@@ -148,13 +158,13 @@ def test_sign_out_returns_to_landing():
 def test_new_students_start_with_an_empty_schedule_and_the_assistant():
     at = _signed_up()
     assert not any("sample" in s.value for s in at.success)
-    at.sidebar.radio[0].set_value("My Schedule").run()
+    _go(at, "My Schedule")
     assert any("build your week" in m.markdown[0].value for m in at.chat_message)
 
 
 def test_chat_builds_the_week_end_to_end():
     at = _signed_up()
-    at.sidebar.radio[0].set_value("My Schedule").run()
+    _go(at, "My Schedule")
     for text in ["CSCE 634 MWF 10:20-11:10", "done", "IUI final report due in 5 days 3 hours",
                  "stats homework due tomorrow 2h"]:
         at.chat_input[0].set_value(text).run()
@@ -167,6 +177,25 @@ def test_chat_builds_the_week_end_to_end():
     for view in ["Day", "Week"]:
         at.radio(key="sched_view").set_value(view).run()
         assert not at.exception
-    at.sidebar.radio[0].set_value("Insights").run()
+    _go(at, "Insights")
     assert not at.exception
     assert any("Deadlines" in m.value for m in at.markdown)
+
+
+@pytest.mark.parametrize(("page", "heading"), [
+    ("My Schedule", "My schedule"), ("Insights", "Insights"), ("Study Mode", "Ready to focus?"),
+    ("Replanning", "Something changed?"), ("Home", "Good "),
+])
+def test_each_section_is_its_own_page(page, heading):
+    at = _signed_up()
+    _go(at, page)
+    assert any(heading in m.value for m in at.markdown)
+    here = next(b for b in at.sidebar.button if b.key == f"nav_{SLUGS[page]}")
+    assert here.proto.type == "primary"  # the current page is highlighted
+
+
+def test_sign_out_from_a_sub_page_returns_to_landing():
+    at = _signed_up()
+    _go(at, "Insights")
+    _click(at, "Sign out")
+    assert "Get started" in [b.label for b in at.button]
